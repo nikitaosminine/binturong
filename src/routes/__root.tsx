@@ -1,11 +1,6 @@
-import { Outlet, Link, createRootRouteWithContext, HeadContent, Scripts } from "@tanstack/react-router";
+import { Outlet, Link, createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
 import { Toaster } from "@/components/ui/sonner";
-import type { AuthState } from "@/hooks/use-auth";
 import appCss from "../styles.css?url";
-
-interface RouterContext {
-  auth: AuthState;
-}
 
 function NotFoundComponent() {
   return (
@@ -29,7 +24,7 @@ function NotFoundComponent() {
   );
 }
 
-export const Route = createRootRouteWithContext<RouterContext>()({
+export const Route = createRootRoute({
   head: () => ({
     meta: [
       { charSet: "utf-8" },
