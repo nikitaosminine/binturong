@@ -1,5 +1,5 @@
 import { BarChart3, LogOut } from "lucide-react";
-import { Link, useLocation } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import {
   Sidebar,
   SidebarContent,
@@ -12,25 +12,27 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { useAuth } from "@/hooks/use-auth";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 
 export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
-  const auth = useAuth();
+  const navigate = useNavigate();
   const isActive = location.pathname.startsWith("/portfolios");
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    navigate({ to: "/login" });
+  };
 
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="p-4">
-        {!collapsed && (
-          <span className="text-lg font-bold tracking-tight text-foreground">Folio</span>
-        )}
-        {collapsed && (
-          <span className="text-lg font-bold tracking-tight text-foreground">F</span>
-        )}
+        <span className="text-lg font-bold tracking-tight text-foreground">
+          {collapsed ? "F" : "Folio"}
+        </span>
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
@@ -53,7 +55,7 @@ export function AppSidebar() {
           variant="ghost"
           size={collapsed ? "icon" : "sm"}
           className="w-full justify-start text-muted-foreground hover:text-foreground"
-          onClick={() => auth.signOut()}
+          onClick={handleSignOut}
         >
           <LogOut className="h-4 w-4" />
           {!collapsed && <span className="ml-2">Sign out</span>}
