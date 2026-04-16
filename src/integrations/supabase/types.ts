@@ -14,7 +14,110 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      holdings: {
+        Row: {
+          created_at: string
+          fees: number
+          id: string
+          isin: string | null
+          name: string
+          portfolio_id: string
+          purchase_date: string
+          purchase_price: number
+          quantity: number
+          ticker: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          fees?: number
+          id?: string
+          isin?: string | null
+          name: string
+          portfolio_id: string
+          purchase_date: string
+          purchase_price: number
+          quantity: number
+          ticker: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          fees?: number
+          id?: string
+          isin?: string | null
+          name?: string
+          portfolio_id?: string
+          purchase_date?: string
+          purchase_price?: number
+          quantity?: number
+          ticker?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "holdings_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: false
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      portfolios: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          display_name: string | null
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
