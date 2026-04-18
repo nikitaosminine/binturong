@@ -168,7 +168,7 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, onSave, onDele
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl max-h-[88vh] flex flex-col p-0 gap-0 overflow-hidden [&>button.absolute]:hidden">
+      <DialogContent hideCloseButton className="sm:max-w-3xl max-h-[88vh] flex flex-col p-0 gap-0 overflow-hidden">
 
         {/* ── VIEW mode ── */}
         {mode === "view" && thesis && (
