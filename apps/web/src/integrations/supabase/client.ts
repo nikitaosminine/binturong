@@ -2,14 +2,11 @@ import { createClient } from "@supabase/supabase-js";
 import type { Database } from "./types";
 
 function createSupabaseClient() {
-  const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-  const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-
-  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
-    throw new Error(
-      "Missing Supabase environment variables. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in your .env file.",
-    );
-  }
+  // Publishable key is safe to embed — it is protected by RLS, not secrecy.
+  const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
+    ?? "https://sfqowvpuzsqgmwlecgdx.supabase.co";
+  const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
+    ?? "sb_publishable_xcYBQwzQm7_Cv8eoqAI8rw_eFVLZiGp";
 
   return createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
     auth: {
