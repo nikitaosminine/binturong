@@ -2,8 +2,7 @@ import { useEffect, useState } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
-import { ThesisDrawer } from "@/components/thesis-drawer";
-import { ThesisModal } from "@/components/thesis-modal";
+import { ThesisCenteredModal } from "@/components/thesis-centered-modal";
 import { useAuth } from "@/hooks/use-auth";
 import { useTheses } from "@/hooks/use-theses";
 import { Thesis } from "@/lib/thesis";
@@ -75,29 +74,19 @@ function Topbar() {
 export default function PrivateRoute() {
   const { isAuthenticated, isLoading } = useAuth();
   const { theses, addThesis, updateThesis, deleteThesis } = useTheses();
-  const [drawerThesisId, setDrawerThesisId] = useState<string | null>(null);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingThesis, setEditingThesis] = useState<Thesis | null>(null);
+  const [selectedThesisId, setSelectedThesisId] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
   if (isLoading) return null;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
 
-  const drawerThesis = drawerThesisId ? theses.find((t) => t.id === drawerThesisId) ?? null : null;
-
-  const openDrawer = (id: string) => setDrawerThesisId(id);
+  const openDrawer = (id: string) => setSelectedThesisId(id);
   const openModal = (thesis?: Thesis) => {
-    setEditingThesis(thesis ?? null);
-    setModalOpen(true);
+    if (thesis) setSelectedThesisId(thesis.id);
+    else setCreateOpen(true);
   };
 
-  const handleSave = (data: Omit<Thesis, "id" | "createdAt">) => {
-    if (editingThesis) {
-      updateThesis(editingThesis.id, data);
-    } else {
-      addThesis(data);
-    }
-  };
-
+  const selectedThesis = selectedThesisId ? theses.find((t) => t.id === selectedThesisId) ?? null : null;
   const activeCount = theses.filter((t) => t.status === "active" || t.status === "playing-out").length;
   const context = { theses, addThesis, updateThesis, deleteThesis, openDrawer, openModal };
 
@@ -112,17 +101,19 @@ export default function PrivateRoute() {
           </main>
         </div>
       </div>
-      <ThesisDrawer
-        thesis={drawerThesis}
-        onClose={() => setDrawerThesisId(null)}
-        onEdit={(t) => { setDrawerThesisId(null); openModal(t); }}
-        onDelete={deleteThesis}
-      />
-      <ThesisModal
-        open={modalOpen}
-        initial={editingThesis}
-        onSave={handleSave}
-        onClose={() => { setModalOpen(false); setEditingThesis(null); }}
+      <ThesisCenteredModal
+        open={!!selectedThesisId || createOpen}
+        onOpenChange={(o) => {
+          if (!o) { setSelectedThesisId(null); setCreateOpen(false); }
+        }}
+        thesis={selectedThesis}
+        onSave={(data) => {
+          if (selectedThesisId) updateThesis(selectedThesisId, data);
+          else addThesis(data);
+          setSelectedThesisId(null);
+          setCreateOpen(false);
+        }}
+        onDelete={(id) => { deleteThesis(id); setSelectedThesisId(null); }}
       />
     </SidebarProvider>
   );

@@ -7,8 +7,9 @@ import { MOCK_PRICES, generateChartData, getSector, get1DPerf } from "@/lib/mock
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { toast } from "sonner";
 import { TakeBadge } from "@/components/take-badge";
-import { Thesis, thesesForTicker } from "@/lib/thesis";
+import { Thesis, thesesForTicker, thesesForPortfolio } from "@/lib/thesis";
 import { EditHoldingModal } from "@/components/edit-holding-modal";
+import { ThesisStack } from "@/components/thesis-stack/ThesisStack";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -31,6 +32,7 @@ interface ThesisContext {
   theses: Thesis[];
   openDrawer: (id: string) => void;
   openModal: (thesis?: Thesis) => void;
+  updateThesis: (id: string, patch: Partial<Thesis>) => void;
 }
 
 function fmt$(n: number) {
@@ -133,7 +135,7 @@ function saveLS(key: string, val: unknown) {
 
 export default function PortfolioDetailPage() {
   const { portfolioId } = useParams<{ portfolioId: string }>();
-  const { theses, openDrawer } = useOutletContext<ThesisContext>();
+  const { theses, openDrawer, updateThesis } = useOutletContext<ThesisContext>();
   const [portfolio, setPortfolio] = useState<{ name: string; description: string | null } | null>(null);
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [period, setPeriod] = useState<string>("1M");
@@ -269,8 +271,13 @@ export default function PortfolioDetailPage() {
     </div>
   );
 
+  const portfolioTickers = Array.from(new Set(holdings.map((h) => h.ticker)));
+  const linkedTheses = thesesForPortfolio(theses, portfolioTickers);
+
   return (
-    <div className="space-y-5">
+    <div className="grid grid-cols-3 gap-6">
+      {/* LEFT — portfolio (2/3) */}
+      <div className="col-span-2 space-y-5 min-w-0">
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
@@ -523,6 +530,14 @@ export default function PortfolioDetailPage() {
           onUpdated={() => { setEditingHolding(null); load(); }}
         />
       )}
+      </div>
+
+      {/* RIGHT — thesis stack (1/3) */}
+      <aside className="col-span-1 min-w-0">
+        <div className="sticky top-6">
+          <ThesisStack theses={linkedTheses} onUpdate={updateThesis} />
+        </div>
+      </aside>
     </div>
   );
 }
