@@ -1,0 +1,12 @@
+name = "binturong-api"
+main = "src/index.ts"
+compatibility_date = "2026-04-17"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+SUPABASE_URL = "https://your-project.supabase.co"
+
+# Secrets (set via CLI, not in this file):
+# wrangler secret put SUPABASE_SERVICE_KEY
+# wrangler secret put SUPABASE_ANON_KEY
+# wrangler secret put ANTHROPIC_API_KEY

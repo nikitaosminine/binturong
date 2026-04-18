@@ -1,19 +1,14 @@
-import { createFileRoute, redirect, Outlet } from "@tanstack/react-router";
+import { Navigate, Outlet } from "react-router-dom";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
-import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/use-auth";
 
-export const Route = createFileRoute("/_authenticated")({
-  beforeLoad: async ({ location }) => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      throw redirect({ to: "/login", search: { redirect: location.href } });
-    }
-  },
-  component: AuthenticatedLayout,
-});
+export default function PrivateRoute() {
+  const { isAuthenticated, isLoading } = useAuth();
 
-function AuthenticatedLayout() {
+  if (isLoading) return null;
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+
   return (
     <SidebarProvider>
       <div className="flex min-h-screen w-full">

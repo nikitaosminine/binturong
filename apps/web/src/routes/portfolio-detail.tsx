@@ -1,5 +1,5 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, useEffect, useMemo } from "react";
+import { Link, useParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -7,10 +7,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { MOCK_PRICES, generateChartData } from "@/lib/mock-data";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { toast } from "sonner";
-
-export const Route = createFileRoute("/_authenticated/portfolios/$portfolioId")({
-  component: PortfolioDetailPage,
-});
 
 interface Holding {
   id: string;
@@ -23,8 +19,8 @@ interface Holding {
   purchase_date: string;
 }
 
-function PortfolioDetailPage() {
-  const { portfolioId } = Route.useParams();
+export default function PortfolioDetailPage() {
+  const { portfolioId } = useParams<{ portfolioId: string }>();
   const [portfolio, setPortfolio] = useState<{ name: string; description: string | null } | null>(null);
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [period, setPeriod] = useState<"1D" | "1M" | "1Y">("1M");
@@ -33,8 +29,8 @@ function PortfolioDetailPage() {
   useEffect(() => {
     const load = async () => {
       const [pRes, hRes] = await Promise.all([
-        supabase.from("portfolios").select("name, description").eq("id", portfolioId).single(),
-        supabase.from("holdings").select("*").eq("portfolio_id", portfolioId),
+        supabase.from("portfolios").select("name, description").eq("id", portfolioId!).single(),
+        supabase.from("holdings").select("*").eq("portfolio_id", portfolioId!),
       ]);
       if (pRes.error) toast.error("Failed to load portfolio");
       else setPortfolio(pRes.data);
@@ -73,7 +69,6 @@ function PortfolioDetailPage() {
         </div>
       </div>
 
-      {/* Chart */}
       <div className="rounded-lg border border-border/50 bg-card p-4">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-medium text-muted-foreground">Portfolio Value</h2>
@@ -125,7 +120,6 @@ function PortfolioDetailPage() {
         </div>
       </div>
 
-      {/* Holdings Table */}
       <div className="rounded-lg border border-border/50">
         <Table>
           <TableHeader>

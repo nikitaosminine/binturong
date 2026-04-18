@@ -1,5 +1,5 @@
 import { BarChart3, LogOut } from "lucide-react";
-import { Link, useLocation, useNavigate } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Sidebar,
   SidebarContent,
@@ -24,7 +24,7 @@ export function AppSidebar() {
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
-    navigate({ to: "/login" });
+    navigate("/login");
   };
 
   return (

@@ -1,5 +1,5 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import { Plus, Upload, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -8,10 +8,6 @@ import { CreateCsvModal } from "@/components/create-csv-modal";
 import { CreateManualModal } from "@/components/create-manual-modal";
 import { toast } from "sonner";
 
-export const Route = createFileRoute("/_authenticated/portfolios")({
-  component: PortfoliosPage,
-});
-
 interface Portfolio {
   id: string;
   name: string;
@@ -19,7 +15,7 @@ interface Portfolio {
   created_at: string;
 }
 
-function PortfoliosPage() {
+export default function PortfoliosPage() {
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [loading, setLoading] = useState(true);
   const [csvOpen, setCsvOpen] = useState(false);
@@ -98,7 +94,7 @@ function PortfoliosPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {portfolios.map((p) => (
-            <Link key={p.id} to="/portfolios/$portfolioId" params={{ portfolioId: p.id }}>
+            <Link key={p.id} to={`/portfolios/${p.id}`}>
               <Card className="group cursor-pointer border-border/50 hover:border-primary/30 transition-colors">
                 <CardHeader>
                   <div className="flex items-center justify-between">
