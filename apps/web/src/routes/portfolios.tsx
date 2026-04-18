@@ -1,13 +1,20 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Upload } from "lucide-react";
+import { MoreHorizontal, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { CreateCsvModal } from "@/components/create-csv-modal";
 import { CreateManualModal } from "@/components/create-manual-modal";
+import { EditPortfolioModal } from "@/components/edit-portfolio-modal";
 import { MOCK_PRICES, generateChartData } from "@/lib/mock-data";
 import { toast } from "sonner";
 import { LineChart, Line, ResponsiveContainer } from "recharts";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface Holding {
   id: string;
@@ -71,7 +78,17 @@ function Sparkline({ points, positive }: { points: { value: number }[]; positive
   );
 }
 
-function PortfolioCard({ portfolio, onClick }: { portfolio: Portfolio; onClick: () => void }) {
+function PortfolioCard({
+  portfolio,
+  onClick,
+  onEdit,
+  onDelete,
+}: {
+  portfolio: Portfolio;
+  onClick: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
   const val = portfolioValue(portfolio.holdings);
   const cost = portfolioCost(portfolio.holdings);
   const pl = val - cost;
@@ -88,8 +105,18 @@ function PortfolioCard({ portfolio, onClick }: { portfolio: Portfolio; onClick: 
   const extra = portfolio.holdings.length - 3;
 
   return (
-    <button onClick={onClick} className="text-left group w-full">
-      <div className="rounded-lg border border-border/50 bg-card p-4 hover:border-primary/30 transition-colors cursor-pointer">
+    <div
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      role="button"
+      tabIndex={0}
+      className="text-left group w-full rounded-lg border border-border/50 bg-card p-4 hover:border-primary/30 transition-colors cursor-pointer"
+    >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-[13px] font-semibold tracking-tight truncate">{portfolio.name}</div>
@@ -97,6 +124,40 @@ function PortfolioCard({ portfolio, onClick }: { portfolio: Portfolio; onClick: 
               <div className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">{portfolio.description}</div>
             )}
           </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                onClick={(e) => e.stopPropagation()}
+                aria-label={`Open actions for ${portfolio.name}`}
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEdit();
+                }}
+              >
+                <Pencil className="mr-2 h-3.5 w-3.5" />
+                Edit
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete();
+                }}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2 className="mr-2 h-3.5 w-3.5" />
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         <div className="mt-3 flex items-end justify-between gap-2">
@@ -123,8 +184,7 @@ function PortfolioCard({ portfolio, onClick }: { portfolio: Portfolio; onClick: 
             )}
           </div>
         )}
-      </div>
-    </button>
+    </div>
   );
 }
 
@@ -149,6 +209,8 @@ export default function PortfoliosPage() {
   const [loading, setLoading] = useState(true);
   const [csvOpen, setCsvOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingPortfolio, setEditingPortfolio] = useState<Portfolio | null>(null);
 
   const fetchPortfolios = async () => {
     const { data, error } = await supabase
@@ -166,6 +228,35 @@ export default function PortfoliosPage() {
   useEffect(() => { fetchPortfolios(); }, []);
 
   const onCreated = () => { setCsvOpen(false); setManualOpen(false); fetchPortfolios(); };
+  const handleEditPortfolio = (portfolio: Portfolio) => {
+    setEditingPortfolio(portfolio);
+    setEditOpen(true);
+  };
+
+  const handleDeletePortfolio = async (portfolio: Portfolio) => {
+    if (!confirm(`Delete ${portfolio.name}? This will remove all holdings in this portfolio.`)) return;
+
+    const { error: holdingsError } = await supabase
+      .from("holdings")
+      .delete()
+      .eq("portfolio_id", portfolio.id);
+    if (holdingsError) {
+      toast.error("Failed to delete portfolio holdings");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("portfolios")
+      .delete()
+      .eq("id", portfolio.id);
+    if (error) {
+      toast.error("Failed to delete portfolio");
+      return;
+    }
+
+    toast.success("Portfolio deleted");
+    fetchPortfolios();
+  };
 
   const totalValue = useMemo(() => portfolios.reduce((s, p) => s + portfolioValue(p.holdings), 0), [portfolios]);
   const totalCost  = useMemo(() => portfolios.reduce((s, p) => s + portfolioCost(p.holdings), 0), [portfolios]);
@@ -221,7 +312,13 @@ export default function PortfoliosPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {portfolios.map((p) => (
-            <PortfolioCard key={p.id} portfolio={p} onClick={() => navigate(`/portfolios/${p.id}`)} />
+            <PortfolioCard
+              key={p.id}
+              portfolio={p}
+              onClick={() => navigate(`/portfolios/${p.id}`)}
+              onEdit={() => handleEditPortfolio(p)}
+              onDelete={() => handleDeletePortfolio(p)}
+            />
           ))}
           <AddCard onNewCsv={() => setCsvOpen(true)} onNewManual={() => setManualOpen(true)} />
         </div>
@@ -229,6 +326,15 @@ export default function PortfoliosPage() {
 
       <CreateCsvModal    open={csvOpen}    onOpenChange={setCsvOpen}    onCreated={onCreated} />
       <CreateManualModal open={manualOpen} onOpenChange={setManualOpen} onCreated={onCreated} />
+      <EditPortfolioModal
+        open={editOpen}
+        onOpenChange={(open) => {
+          setEditOpen(open);
+          if (!open) setEditingPortfolio(null);
+        }}
+        portfolio={editingPortfolio}
+        onSaved={fetchPortfolios}
+      />
     </div>
   );
 }
