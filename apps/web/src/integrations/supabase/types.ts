@@ -151,7 +151,14 @@ export type Database = {
           user_id: string
           title: string
           content: string
+          summary: string
+          conviction: string
           status: string
+          tickers: string[]
+          body: Json
+          evidence: Json
+          horizon: string
+          tags: string[]
           created_at: string
           updated_at: string
         }
@@ -160,7 +167,14 @@ export type Database = {
           user_id: string
           title: string
           content?: string
+          summary?: string
+          conviction?: string
           status?: string
+          tickers?: string[]
+          body?: Json
+          evidence?: Json
+          horizon?: string
+          tags?: string[]
           created_at?: string
           updated_at?: string
         }
@@ -169,7 +183,14 @@ export type Database = {
           user_id?: string
           title?: string
           content?: string
+          summary?: string
+          conviction?: string
           status?: string
+          tickers?: string[]
+          body?: Json
+          evidence?: Json
+          horizon?: string
+          tags?: string[]
           created_at?: string
           updated_at?: string
         }
