@@ -133,7 +133,7 @@ function SectorAllocationCard({ rows }: { rows: RowData[] }) {
                   </Pie>
                   <Tooltip
                     contentStyle={{ backgroundColor: "oklch(0.18 0.03 264)", border: "1px solid oklch(1 0 0 / 8%)", borderRadius: "8px", color: "oklch(0.96 0.005 264)", fontSize: "11px" }}
-                    formatter={(v) => [`${((Number(v) / total) * 100).toFixed(1)}%`, ""]}
+                    formatter={(v, name) => [`${((Number(v) / total) * 100).toFixed(1)}%`, String(name)]}
                   />
                 </PieChart>
               </ResponsiveContainer>
@@ -426,11 +426,9 @@ export default function PortfolioDetailPage() {
         </div>
       </div>
 
-      {/* Holdings + sidebar */}
-      <div className="grid grid-cols-3 gap-4">
-        {/* Holdings table */}
-        <div className="col-span-2">
-          <div className="rounded-lg border border-border/50 overflow-hidden">
+      {/* Holdings table — full width */}
+      <div>
+        <div className="rounded-lg border border-border/50 overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
               <div className="text-[11px] uppercase tracking-widest text-muted-foreground">Holdings</div>
               <div className="text-[11px] text-muted-foreground font-mono">{rows.length} positions</div>
@@ -571,22 +569,17 @@ export default function PortfolioDetailPage() {
             </div>
           </div>
         </div>
-
-        {/* Right sidebar */}
-        <div className="col-span-1 flex flex-col gap-4">
-          {/* Risk Watch — small now, expands downward as items fill in */}
-          <div className="rounded-lg border border-border/50 bg-card p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="text-[11px] uppercase tracking-widest text-muted-foreground">Risk watch</div>
-              <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] bg-amber-500/10 text-amber-400 font-medium">
-                coming soon
-              </span>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              AI-powered risk monitoring will surface issues as markets move.
-            </p>
-          </div>
+      {/* Risk Watch — compact, grows downward */}
+      <div className="rounded-lg border border-border/50 bg-card p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-[11px] uppercase tracking-widest text-muted-foreground">Risk watch</div>
+          <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] bg-amber-500/10 text-amber-400 font-medium">
+            coming soon
+          </span>
         </div>
+        <p className="text-xs text-muted-foreground">
+          AI-powered risk monitoring will surface issues as markets move.
+        </p>
       </div>
 
       {/* Add holding modal */}
