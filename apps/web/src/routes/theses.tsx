@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Plus, Search } from "lucide-react";
+import { Plus, Search, Paperclip } from "lucide-react";
 import { useOutletContext } from "react-router-dom";
 import { Thesis, ThesisConviction, ThesisStatus } from "@/lib/thesis";
 import { Button } from "@/components/ui/button";
@@ -84,9 +84,17 @@ function ThesisCard({ thesis, onOpen }: { thesis: Thesis; onOpen: () => void }) 
             </span>
           ))}
         </div>
-        {thesis.evidence.length > 0 && (
-          <span className="text-xs text-muted-foreground">{thesis.evidence.length} signals</span>
-        )}
+        <div className="flex items-center gap-2">
+          {(thesis.attachments ?? []).length > 0 && (
+            <span className="inline-flex items-center gap-0.5 text-xs text-muted-foreground">
+              <Paperclip className="h-3 w-3" />
+              {thesis.attachments.length}
+            </span>
+          )}
+          {thesis.evidence.length > 0 && (
+            <span className="text-xs text-muted-foreground">{thesis.evidence.length} signals</span>
+          )}
+        </div>
       </div>
     </button>
   );

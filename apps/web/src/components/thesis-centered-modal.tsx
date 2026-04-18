@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { X, Pencil, Trash2, Check, Paperclip, FileText, FileImage } from "lucide-react";
+import { X, Pencil, Trash2, Check, Paperclip, FileText, FileImage, ChevronLeft, ChevronRight, ZoomIn } from "lucide-react";
+import * as XLSX from "xlsx";
 import { DialogClose } from "@/components/ui/dialog";
 import {
   Thesis,
@@ -84,6 +85,15 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
+function isSpreadsheet(type: string, name: string): boolean {
+  return (
+    type === "text/csv" ||
+    type === "application/vnd.ms-excel" ||
+    type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+    name.endsWith(".csv") || name.endsWith(".xls") || name.endsWith(".xlsx")
+  );
+}
+
 export function ThesisCenteredModal({ open, onOpenChange, thesis, onSave, onDelete }: Props) {
   const isCreate = thesis === null;
   const [mode, setMode] = useState<"view" | "edit">(isCreate ? "edit" : "view");
@@ -109,6 +119,14 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, onSave, onDele
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Lightbox state
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+
+  // Spreadsheet preview state
+  const [sheetPreview, setSheetPreview] = useState<{ name: string; rows: unknown[][] } | null>(null);
+  const [sheetLoading, setSheetLoading] = useState(false);
+
   // Reset form + mode when modal opens or thesis changes
   useEffect(() => {
     if (!open) return;
@@ -132,6 +150,8 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, onSave, onDele
     setPendingFiles([]);
     setRemovedPaths([]);
     setTickerSearch("");
+    setLightboxSrc(null);
+    setSheetPreview(null);
   }, [open, thesis]);
 
   // Generate signed URLs when viewing attachments
@@ -325,22 +345,65 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, onSave, onDele
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Attachments</p>
                     <div className="flex flex-wrap gap-3">
-                      {(thesis.attachments ?? []).map((att) => {
+                      {(thesis.attachments ?? []).map((att, idx) => {
                         const url = signedUrls[att.path];
                         const isImage = att.type.startsWith("image/");
-                        return isImage ? (
-                          <a key={att.path} href={url} target="_blank" rel="noopener noreferrer" className="block">
-                            {url ? (
+                        const isSheet = isSpreadsheet(att.type, att.name);
+                        const imageAtts = (thesis.attachments ?? []).filter((a) => a.type.startsWith("image/"));
+
+                        if (isImage) {
+                          return url ? (
+                            <button
+                              key={att.path}
+                              onClick={() => {
+                                setLightboxIndex(imageAtts.indexOf(att));
+                                setLightboxSrc(url);
+                              }}
+                              className="relative group block"
+                            >
                               <img
                                 src={url}
                                 alt={att.name}
-                                className="h-28 w-28 object-cover rounded-md border border-border/50 hover:opacity-80 transition-opacity"
+                                className="h-28 w-28 object-cover rounded-md border border-border/50 transition-opacity group-hover:opacity-70"
                               />
-                            ) : (
-                              <div className="h-28 w-28 rounded-md border border-border/50 bg-muted animate-pulse" />
-                            )}
-                          </a>
-                        ) : (
+                              <span className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                <ZoomIn className="h-5 w-5 text-white drop-shadow" />
+                              </span>
+                            </button>
+                          ) : (
+                            <div key={att.path} className="h-28 w-28 rounded-md border border-border/50 bg-muted animate-pulse" />
+                          );
+                        }
+
+                        if (isSheet) {
+                          return (
+                            <button
+                              key={att.path}
+                              disabled={!url || sheetLoading}
+                              onClick={async () => {
+                                if (!url) return;
+                                setSheetLoading(true);
+                                try {
+                                  const res = await fetch(url);
+                                  const buf = await res.arrayBuffer();
+                                  const wb = XLSX.read(buf, { type: "array" });
+                                  const ws = wb.Sheets[wb.SheetNames[0]];
+                                  const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1 });
+                                  setSheetPreview({ name: att.name, rows });
+                                } finally {
+                                  setSheetLoading(false);
+                                }
+                              }}
+                              className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-border/50 bg-muted/30 text-xs hover:bg-muted/60 transition-colors disabled:opacity-50"
+                            >
+                              <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              <span className="truncate max-w-[160px]">{att.name}</span>
+                              <span className="text-muted-foreground/60 shrink-0">{formatSize(att.size)}</span>
+                            </button>
+                          );
+                        }
+
+                        return (
                           <a
                             key={att.path}
                             href={url}
@@ -609,6 +672,100 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, onSave, onDele
           </>
         )}
       </DialogContent>
+
+      {/* Image lightbox */}
+      {lightboxSrc && thesis && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center"
+          onClick={() => setLightboxSrc(null)}
+        >
+          <button
+            className="absolute top-4 right-4 text-white/60 hover:text-white transition-colors"
+            onClick={() => setLightboxSrc(null)}
+          >
+            <X className="h-6 w-6" />
+          </button>
+          {/* Prev / next arrows when multiple images */}
+          {(() => {
+            const imageAtts = (thesis.attachments ?? []).filter((a) => a.type.startsWith("image/"));
+            return imageAtts.length > 1 ? (
+              <>
+                <button
+                  className="absolute left-4 top-1/2 -translate-y-1/2 text-white/60 hover:text-white transition-colors"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const prev = (lightboxIndex - 1 + imageAtts.length) % imageAtts.length;
+                    setLightboxIndex(prev);
+                    setLightboxSrc(signedUrls[imageAtts[prev].path]);
+                  }}
+                >
+                  <ChevronLeft className="h-8 w-8" />
+                </button>
+                <button
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-white/60 hover:text-white transition-colors"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const next = (lightboxIndex + 1) % imageAtts.length;
+                    setLightboxIndex(next);
+                    setLightboxSrc(signedUrls[imageAtts[next].path]);
+                  }}
+                >
+                  <ChevronRight className="h-8 w-8" />
+                </button>
+              </>
+            ) : null;
+          })()}
+          <img
+            src={lightboxSrc}
+            alt=""
+            className="max-h-[90vh] max-w-[90vw] object-contain rounded shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+
+      {/* Spreadsheet preview overlay */}
+      {sheetPreview && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-6"
+          onClick={() => setSheetPreview(null)}
+        >
+          <div
+            className="bg-card rounded-xl border border-border shadow-2xl flex flex-col max-h-[85vh] max-w-[90vw] w-full overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+              <span className="text-sm font-medium truncate">{sheetPreview.name}</span>
+              <button
+                className="text-muted-foreground hover:text-foreground transition-colors ml-4 shrink-0"
+                onClick={() => setSheetPreview(null)}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="overflow-auto flex-1">
+              <table className="text-xs border-collapse w-full">
+                <tbody>
+                  {sheetPreview.rows.slice(0, 200).map((row, ri) => (
+                    <tr key={ri} className={ri === 0 ? "bg-muted/40 font-semibold sticky top-0" : "border-t border-border/40 hover:bg-muted/20"}>
+                      {(row as unknown[]).map((cell, ci) => (
+                        <td key={ci} className="px-3 py-1.5 whitespace-nowrap border-r border-border/30 last:border-r-0 font-mono tabular-nums">
+                          {cell != null ? String(cell) : ""}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {sheetPreview.rows.length > 200 && (
+                <p className="text-xs text-muted-foreground text-center py-3">
+                  Showing first 200 rows of {sheetPreview.rows.length}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </Dialog>
   );
 }
