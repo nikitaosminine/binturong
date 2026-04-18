@@ -4,7 +4,8 @@ import { ArrowLeft, Plus, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { MOCK_PRICES, generateChartData, getSector, get1DPerf } from "@/lib/mock-data";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
+import { BarChart3, PieChart as PieChartIcon } from "lucide-react";
 import { toast } from "sonner";
 import { TakeBadge } from "@/components/take-badge";
 import { Thesis, thesesForTicker, thesesForPortfolio } from "@/lib/thesis";
@@ -57,6 +58,7 @@ function StatCard({ label, value, tone = "neutral", muted = false }: {
 
 // Sector allocation sidebar card
 function SectorAllocationCard({ rows }: { rows: RowData[] }) {
+  const [view, setView] = useState<"bar" | "pie">("bar");
   const total = rows.reduce((s, r) => s + r.total, 0);
   const bySector: Record<string, number> = {};
   rows.forEach((r) => { bySector[r.sector] = (bySector[r.sector] || 0) + r.total; });
@@ -65,26 +67,88 @@ function SectorAllocationCard({ rows }: { rows: RowData[] }) {
     "oklch(0.65 0.19 250)", "oklch(0.70 0.15 160)", "oklch(0.75 0.18 70)",
     "oklch(0.65 0.22 300)", "oklch(0.65 0.24 16)", "oklch(0.70 0.10 200)",
   ];
+  const pieData = entries.map(([name, value], i) => ({ name, value, fill: colors[i % colors.length] }));
   return (
-    <div className="rounded-lg border border-border/50 bg-card p-4">
-      <div className="text-[11px] uppercase tracking-widest text-muted-foreground mb-3">Sector allocation</div>
+    <div className="rounded-lg border border-border/50 bg-card p-4 h-full flex flex-col">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-[11px] uppercase tracking-widest text-muted-foreground">Sector allocation</div>
+        {total > 0 && (
+          <div className="flex items-center rounded-md border border-border overflow-hidden">
+            <button
+              onClick={() => setView("bar")}
+              className={`h-6 w-6 flex items-center justify-center transition-colors ${
+                view === "bar" ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+              }`}
+              aria-label="Bar view"
+            >
+              <BarChart3 className="h-3 w-3" />
+            </button>
+            <button
+              onClick={() => setView("pie")}
+              className={`h-6 w-6 flex items-center justify-center transition-colors ${
+                view === "pie" ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+              }`}
+              aria-label="Pie view"
+            >
+              <PieChartIcon className="h-3 w-3" />
+            </button>
+          </div>
+        )}
+      </div>
       {total > 0 ? (
-        <>
-          <div className="flex h-2 rounded-full overflow-hidden bg-[oklch(1_0_0/5%)]">
-            {entries.map(([s, v], i) => (
-              <div key={s} style={{ width: `${(v / total) * 100}%`, background: colors[i % colors.length] }} />
-            ))}
+        view === "bar" ? (
+          <>
+            <div className="flex h-2 rounded-full overflow-hidden bg-[oklch(1_0_0/5%)]">
+              {entries.map(([s, v], i) => (
+                <div key={s} style={{ width: `${(v / total) * 100}%`, background: colors[i % colors.length] }} />
+              ))}
+            </div>
+            <div className="mt-3 flex flex-col gap-1.5">
+              {entries.map(([s, v], i) => (
+                <div key={s} className="flex items-center gap-2 text-[11px]">
+                  <span className="h-2 w-2 rounded-sm shrink-0" style={{ background: colors[i % colors.length] }} />
+                  <span className="flex-1 truncate">{s}</span>
+                  <span className="font-mono tabular-nums text-muted-foreground">{((v / total) * 100).toFixed(1)}%</span>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="flex flex-col items-center">
+            <div className="w-full h-32">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={pieData}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={28}
+                    outerRadius={56}
+                    paddingAngle={1}
+                    stroke="none"
+                  >
+                    {pieData.map((e, i) => <Cell key={i} fill={e.fill} />)}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{ backgroundColor: "oklch(0.18 0.03 264)", border: "1px solid oklch(1 0 0 / 8%)", borderRadius: "8px", color: "oklch(0.96 0.005 264)", fontSize: "11px" }}
+                    formatter={(v) => [`${((Number(v) / total) * 100).toFixed(1)}%`, ""]}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="mt-2 w-full grid grid-cols-1 gap-1">
+              {entries.map(([s, v], i) => (
+                <div key={s} className="flex items-center gap-2 text-[11px]">
+                  <span className="h-2 w-2 rounded-sm shrink-0" style={{ background: colors[i % colors.length] }} />
+                  <span className="flex-1 truncate">{s}</span>
+                  <span className="font-mono tabular-nums text-muted-foreground">{((v / total) * 100).toFixed(1)}%</span>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="mt-3 flex flex-col gap-1.5">
-            {entries.map(([s, v], i) => (
-              <div key={s} className="flex items-center gap-2 text-[11px]">
-                <span className="h-2 w-2 rounded-sm shrink-0" style={{ background: colors[i % colors.length] }} />
-                <span className="flex-1 truncate">{s}</span>
-                <span className="font-mono tabular-nums text-muted-foreground">{((v / total) * 100).toFixed(1)}%</span>
-              </div>
-            ))}
-          </div>
-        </>
+        )
       ) : (
         <p className="text-xs text-muted-foreground">No holdings data.</p>
       )}
@@ -315,45 +379,50 @@ export default function PortfolioDetailPage() {
         <StatCard label="Return"         value={fmtPct(returnPct)} tone={returnPct >= 0 ? "positive" : "negative"} />
       </div>
 
-      {/* Chart */}
-      <div className="rounded-lg border border-border/50 bg-card p-4">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <div className="text-[11px] uppercase tracking-widest text-muted-foreground">Portfolio value</div>
-            <div className="mt-1 flex items-baseline gap-2">
-              <span className="text-2xl font-semibold font-mono tabular-nums">{fmt$(totalValue)}</span>
-              <span className={`text-xs font-mono ${totalPL >= 0 ? "text-positive" : "text-negative"}`}>
-                {fmt$(totalPL)} {fmtPct(returnPct)}
-              </span>
+      {/* Chart + Sector allocation */}
+      <div className="grid grid-cols-4 gap-3">
+        <div className="col-span-3 rounded-lg border border-border/50 bg-card p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <div className="text-[11px] uppercase tracking-widest text-muted-foreground">Portfolio value</div>
+              <div className="mt-1 flex items-baseline gap-2">
+                <span className="text-2xl font-semibold font-mono tabular-nums">{fmt$(totalValue)}</span>
+                <span className={`text-xs font-mono ${totalPL >= 0 ? "text-positive" : "text-negative"}`}>
+                  {fmt$(totalPL)} {fmtPct(returnPct)}
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center rounded-md border border-border overflow-hidden">
+              {(["1D", "1W", "1M", "1Y", "ALL"] as const).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setPeriod(p)}
+                  className={`px-2.5 h-7 text-[11px] font-medium transition-colors ${
+                    period === p ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                  }`}
+                >
+                  {p}
+                </button>
+              ))}
             </div>
           </div>
-          <div className="flex items-center rounded-md border border-border overflow-hidden">
-            {(["1D", "1W", "1M", "1Y", "ALL"] as const).map((p) => (
-              <button
-                key={p}
-                onClick={() => setPeriod(p)}
-                className={`px-2.5 h-7 text-[11px] font-medium transition-colors ${
-                  period === p ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-                }`}
-              >
-                {p}
-              </button>
-            ))}
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData}>
+                <XAxis dataKey="date" stroke="oklch(0.60 0.02 264)" fontSize={11} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                <YAxis stroke="oklch(0.60 0.02 264)" fontSize={11} tickLine={false} axisLine={false}
+                  tickFormatter={(v: number) => `$${(v / 1000).toFixed(1)}k`}
+                  domain={["dataMin - 500", "dataMax + 500"]} />
+                <Tooltip
+                  contentStyle={{ backgroundColor: "oklch(0.18 0.03 264)", border: "1px solid oklch(1 0 0 / 8%)", borderRadius: "8px", color: "oklch(0.96 0.005 264)", fontSize: "12px" }}
+                />
+                <Line type="monotone" dataKey="value" stroke="oklch(0.65 0.19 250)" strokeWidth={2} dot={false} isAnimationActive={false} />
+              </LineChart>
+            </ResponsiveContainer>
           </div>
         </div>
-        <div className="h-64">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData}>
-              <XAxis dataKey="date" stroke="oklch(0.60 0.02 264)" fontSize={11} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-              <YAxis stroke="oklch(0.60 0.02 264)" fontSize={11} tickLine={false} axisLine={false}
-                tickFormatter={(v: number) => `$${(v / 1000).toFixed(1)}k`}
-                domain={["dataMin - 500", "dataMax + 500"]} />
-              <Tooltip
-                contentStyle={{ backgroundColor: "oklch(0.18 0.03 264)", border: "1px solid oklch(1 0 0 / 8%)", borderRadius: "8px", color: "oklch(0.96 0.005 264)", fontSize: "12px" }}
-              />
-              <Line type="monotone" dataKey="value" stroke="oklch(0.65 0.19 250)" strokeWidth={2} dot={false} isAnimationActive={false} />
-            </LineChart>
-          </ResponsiveContainer>
+        <div className="col-span-1">
+          <SectorAllocationCard rows={rows} />
         </div>
       </div>
 
@@ -505,7 +574,7 @@ export default function PortfolioDetailPage() {
 
         {/* Right sidebar */}
         <div className="col-span-1 flex flex-col gap-4">
-          {/* Risk Watch stub */}
+          {/* Risk Watch — small now, expands downward as items fill in */}
           <div className="rounded-lg border border-border/50 bg-card p-4">
             <div className="flex items-center justify-between mb-3">
               <div className="text-[11px] uppercase tracking-widest text-muted-foreground">Risk watch</div>
@@ -517,9 +586,6 @@ export default function PortfolioDetailPage() {
               AI-powered risk monitoring will surface issues as markets move.
             </p>
           </div>
-
-          {/* Sector allocation */}
-          <SectorAllocationCard rows={rows} />
         </div>
       </div>
 
