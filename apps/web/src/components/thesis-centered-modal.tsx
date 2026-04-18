@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from "react";
 import { X, Pencil, Trash2, Check, Paperclip, FileText, FileImage, ChevronLeft, ChevronRight, ZoomIn } from "lucide-react";
-import * as XLSX from "xlsx";
 import { DialogClose } from "@/components/ui/dialog";
 import {
   Thesis,
@@ -85,13 +84,32 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
-function isSpreadsheet(type: string, name: string): boolean {
-  return (
-    type === "text/csv" ||
-    type === "application/vnd.ms-excel" ||
-    type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
-    name.endsWith(".csv") || name.endsWith(".xls") || name.endsWith(".xlsx")
-  );
+function isCsv(type: string, name: string): boolean {
+  return type === "text/csv" || name.toLowerCase().endsWith(".csv");
+}
+
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const cells: string[] = [];
+    let cur = "";
+    let inQuote = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQuote && line[i + 1] === '"') { cur += '"'; i++; }
+        else inQuote = !inQuote;
+      } else if (ch === "," && !inQuote) {
+        cells.push(cur); cur = "";
+      } else {
+        cur += ch;
+      }
+    }
+    cells.push(cur);
+    rows.push(cells);
+  }
+  return rows;
 }
 
 export function ThesisCenteredModal({ open, onOpenChange, thesis, onSave, onDelete }: Props) {
@@ -124,7 +142,7 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, onSave, onDele
   const [lightboxIndex, setLightboxIndex] = useState(0);
 
   // Spreadsheet preview state
-  const [sheetPreview, setSheetPreview] = useState<{ name: string; rows: unknown[][] } | null>(null);
+  const [sheetPreview, setSheetPreview] = useState<{ name: string; rows: string[][] } | null>(null);
   const [sheetLoading, setSheetLoading] = useState(false);
 
   // Reset form + mode when modal opens or thesis changes
@@ -348,7 +366,7 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, onSave, onDele
                       {(thesis.attachments ?? []).map((att, idx) => {
                         const url = signedUrls[att.path];
                         const isImage = att.type.startsWith("image/");
-                        const isSheet = isSpreadsheet(att.type, att.name);
+                        const isCsvFile = isCsv(att.type, att.name);
                         const imageAtts = (thesis.attachments ?? []).filter((a) => a.type.startsWith("image/"));
 
                         if (isImage) {
@@ -375,7 +393,7 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, onSave, onDele
                           );
                         }
 
-                        if (isSheet) {
+                        if (isCsvFile) {
                           return (
                             <button
                               key={att.path}
@@ -384,12 +402,8 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, onSave, onDele
                                 if (!url) return;
                                 setSheetLoading(true);
                                 try {
-                                  const res = await fetch(url);
-                                  const buf = await res.arrayBuffer();
-                                  const wb = XLSX.read(buf, { type: "array" });
-                                  const ws = wb.Sheets[wb.SheetNames[0]];
-                                  const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1 });
-                                  setSheetPreview({ name: att.name, rows });
+                                  const text = await fetch(url).then((r) => r.text());
+                                  setSheetPreview({ name: att.name, rows: parseCsv(text) });
                                 } finally {
                                   setSheetLoading(false);
                                 }
@@ -748,9 +762,9 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, onSave, onDele
                 <tbody>
                   {sheetPreview.rows.slice(0, 200).map((row, ri) => (
                     <tr key={ri} className={ri === 0 ? "bg-muted/40 font-semibold sticky top-0" : "border-t border-border/40 hover:bg-muted/20"}>
-                      {(row as unknown[]).map((cell, ci) => (
+                      {row.map((cell, ci) => (
                         <td key={ci} className="px-3 py-1.5 whitespace-nowrap border-r border-border/30 last:border-r-0 font-mono tabular-nums">
-                          {cell != null ? String(cell) : ""}
+                          {cell}
                         </td>
                       ))}
                     </tr>
