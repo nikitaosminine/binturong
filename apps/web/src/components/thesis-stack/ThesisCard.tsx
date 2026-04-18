@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 import { useState } from "react";
-import { Pencil, Check } from "lucide-react";
+import { Pencil, Check, Eye, Paperclip } from "lucide-react";
 import type { Thesis } from "@/lib/thesis";
 import { bodyToHtml, htmlToBody } from "@/lib/thesis-html";
 import { RichTextEditor } from "./RichTextEditor";
@@ -10,6 +10,7 @@ type Props = {
   thesis: Thesis;
   expanded: boolean;
   onChange: (id: string, patch: Partial<Thesis>) => void;
+  onOpen: (id: string) => void;
 };
 
 function formatDate(iso: string) {
@@ -22,8 +23,9 @@ function formatDate(iso: string) {
   });
 }
 
-export function ThesisCard({ thesis, expanded, onChange }: Props) {
+export function ThesisCard({ thesis, expanded, onChange, onOpen }: Props) {
   const [editing, setEditing] = useState(false);
+  const attachmentCount = thesis.attachments?.length ?? 0;
 
   const update = (patch: Partial<Thesis>) => onChange(thesis.id, patch);
 
@@ -52,25 +54,42 @@ export function ThesisCard({ thesis, expanded, onChange }: Props) {
             )}
             <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
               <span>Updated {formatDate(thesis.createdAt)}</span>
+              {attachmentCount > 0 && (
+                <span className="inline-flex items-center gap-1">
+                  <Paperclip className="h-3 w-3" />
+                  {attachmentCount} {attachmentCount === 1 ? "attachment" : "attachments"}
+                </span>
+              )}
             </div>
           </div>
 
           {expanded && (
-            <button
-              type="button"
-              onClick={() => setEditing((v) => !v)}
-              className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-secondary/40 px-2 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-            >
-              {editing ? (
-                <>
-                  <Check className="h-3 w-3" /> Done
-                </>
-              ) : (
-                <>
-                  <Pencil className="h-3 w-3" /> Edit
-                </>
-              )}
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => onOpen(thesis.id)}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-secondary/40 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                aria-label="Open thesis details"
+                title="Open thesis details"
+              >
+                <Eye className="h-3 w-3" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditing((v) => !v)}
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-secondary/40 px-2 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              >
+                {editing ? (
+                  <>
+                    <Check className="h-3 w-3" /> Done
+                  </>
+                ) : (
+                  <>
+                    <Pencil className="h-3 w-3" /> Quick edit
+                  </>
+                )}
+              </button>
+            </div>
           )}
         </div>
 

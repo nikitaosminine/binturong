@@ -7,13 +7,14 @@ import { ThesisCard } from "./ThesisCard";
 type Props = {
   theses: Thesis[];
   onUpdate: (id: string, patch: Partial<Thesis>) => void;
+  onOpen: (id: string) => void;
 };
 
 const STACK_OFFSET = 14;
 const STACK_SCALE_STEP = 0.018;
 const STACK_VISIBLE_CARD_HEIGHT = 96;
 
-export function ThesisStack({ theses, onUpdate }: Props) {
+export function ThesisStack({ theses, onUpdate, onOpen }: Props) {
   const [expanded, setExpanded] = useState(false);
 
   if (theses.length === 0) {
@@ -98,7 +99,7 @@ export function ThesisStack({ theses, onUpdate }: Props) {
                   }}
                   transition={{ type: "spring", stiffness: 260, damping: 28 }}
                 >
-                  <ThesisCard thesis={t} expanded={false} onChange={onUpdate} />
+                  <ThesisCard thesis={t} expanded={false} onChange={onUpdate} onOpen={onOpen} />
                 </motion.div>
               );
             })}
@@ -111,7 +112,7 @@ export function ThesisStack({ theses, onUpdate }: Props) {
           <div className="flex flex-col gap-4">
             {theses.map((t) => (
               <motion.div key={t.id} layoutId={`thesis-${t.id}`}>
-                <ThesisCard thesis={t} expanded onChange={onUpdate} />
+                <ThesisCard thesis={t} expanded onChange={onUpdate} onOpen={onOpen} />
               </motion.div>
             ))}
           </div>

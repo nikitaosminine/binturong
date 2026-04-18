@@ -604,7 +604,7 @@ export default function PortfolioDetailPage() {
       {/* RIGHT — thesis stack (1/3) */}
       <aside className="col-span-1 min-w-0">
         <div className="sticky top-6">
-          <ThesisStack theses={linkedTheses} onUpdate={updateThesis} />
+          <ThesisStack theses={linkedTheses} onUpdate={updateThesis} onOpen={openDrawer} />
         </div>
       </aside>
     </div>
