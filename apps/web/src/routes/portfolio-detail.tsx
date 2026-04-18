@@ -270,7 +270,7 @@ export default function PortfolioDetailPage() {
   );
 
   return (
-    <div className="max-w-6xl mx-auto space-y-5">
+    <div className="space-y-5">
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
@@ -357,8 +357,19 @@ export default function PortfolioDetailPage() {
               <div className="text-[11px] uppercase tracking-widest text-muted-foreground">Holdings</div>
               <div className="text-[11px] text-muted-foreground font-mono">{rows.length} positions</div>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
+            <div className="overflow-x-hidden">
+              <table className="w-full table-fixed">
+                <colgroup>
+                  {visibleCols.map((key) => {
+                    const w: Record<string, string> = {
+                      name: "28%", qty: "5%", cur: "8%", buy: "8%",
+                      total: "8%", gl: "9%", weight: "6%", sector: "11%",
+                      perf1D: "6%", perfYTD: "6%", take: "5%",
+                    };
+                    return <col key={key} style={{ width: w[key] ?? "auto" }} />;
+                  })}
+                  <col style={{ width: "5%" }} />
+                </colgroup>
                 <thead>
                   <tr className="border-b border-border">
                     {visibleCols.map((key) => {
@@ -373,7 +384,7 @@ export default function PortfolioDetailPage() {
                               onDragOver={(e) => e.preventDefault()}
                               onDrop={() => handleDrop(key)}
                               onClick={() => handleSort(key)}
-                              className={`text-[10px] font-medium uppercase tracking-wider text-muted-foreground cursor-pointer select-none px-3 py-2 whitespace-nowrap ${col.align === "right" ? "text-right" : col.align === "center" ? "text-center" : "text-left"} ${active ? "text-foreground" : ""}`}
+                              className={`text-[10px] font-medium uppercase tracking-wider text-muted-foreground cursor-pointer select-none px-2 py-2 whitespace-nowrap ${col.align === "right" ? "text-right" : col.align === "center" ? "text-center" : "text-left"} ${active ? "text-foreground" : ""}`}
                             >
                               {col.label}
                               {active && <span className="ml-1 text-[9px]">{sortDir === "asc" ? "↑" : "↓"}</span>}
@@ -393,7 +404,7 @@ export default function PortfolioDetailPage() {
                         </ContextMenu>
                       );
                     })}
-                    <th className="w-16 px-3 py-2" />
+                    <th className="w-14 px-2 py-2" />
                   </tr>
                 </thead>
                 <tbody>
@@ -413,15 +424,15 @@ export default function PortfolioDetailPage() {
                             const col = ALL_COLUMNS.find((c) => c.key === key)!;
                             const alignCls = col.align === "right" ? "text-right" : col.align === "center" ? "text-center" : "";
                             return (
-                              <td key={key} className={`px-3 py-2.5 text-[13px] ${alignCls}`}>
+                              <td key={key} className={`px-2 py-2 text-[12px] ${alignCls}`}>
                                 {key === "name" && (
-                                  <div className="flex items-center gap-2.5">
-                                    <div className="h-7 w-7 rounded-md bg-[oklch(1_0_0/5%)] border border-border flex items-center justify-center shrink-0">
-                                      <span className="font-mono text-[10px] font-semibold">{r.ticker.slice(0, 2)}</span>
+                                  <div className="flex items-center gap-2">
+                                    <div className="h-6 w-6 rounded-md bg-[oklch(1_0_0/5%)] border border-border flex items-center justify-center shrink-0">
+                                      <span className="font-mono text-[9px] font-semibold">{r.ticker.slice(0, 2)}</span>
                                     </div>
                                     <div className="min-w-0">
-                                      <div className="text-[13px] font-medium truncate">{r.name}</div>
-                                      <div className="text-[11px] text-muted-foreground font-mono">{r.ticker}{r.isin ? ` · ${r.isin}` : ""}</div>
+                                      <div className="text-[12px] font-medium truncate">{r.name}</div>
+                                      <div className="text-[10px] text-muted-foreground font-mono">{r.ticker}{r.isin ? ` · ${r.isin}` : ""}</div>
                                     </div>
                                   </div>
                                 )}
@@ -455,7 +466,7 @@ export default function PortfolioDetailPage() {
                             );
                           })}
                           {/* Row actions */}
-                          <td className="px-3 py-2.5">
+                          <td className="px-2 py-2">
                             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                               <Button
                                 variant="ghost" size="icon"
