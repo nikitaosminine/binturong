@@ -1,39 +1,95 @@
-import { useState, useEffect } from "react";
-import { Thesis, DEMO_THESES } from "@/lib/thesis";
+import { useState, useEffect, useCallback } from "react";
+import { Thesis, ThesisBodyBlock, ThesisEvidence, ThesisConviction, ThesisStatus } from "@/lib/thesis";
+import { supabase } from "@/integrations/supabase/client";
+import { Json } from "@/integrations/supabase/types";
 
-const STORAGE_KEY = "binturong.theses";
+function dbRowToThesis(row: {
+  id: string;
+  title: string;
+  summary: string;
+  conviction: string;
+  status: string;
+  tickers: string[];
+  body: Json;
+  evidence: Json;
+  horizon: string;
+  tags: string[];
+  created_at: string;
+}): Thesis {
+  return {
+    id: row.id,
+    title: row.title,
+    summary: row.summary,
+    conviction: row.conviction as ThesisConviction,
+    status: row.status as ThesisStatus,
+    tickers: row.tickers,
+    body: (row.body as unknown as ThesisBodyBlock[]) ?? [],
+    evidence: (row.evidence as unknown as ThesisEvidence[]) ?? [],
+    horizon: row.horizon,
+    tags: row.tags,
+    createdAt: row.created_at.split("T")[0],
+  };
+}
+
+function thesisToRow(fields: Partial<Omit<Thesis, "id" | "createdAt">>) {
+  const row: Record<string, unknown> = {};
+  if (fields.title !== undefined) row.title = fields.title;
+  if (fields.summary !== undefined) row.summary = fields.summary;
+  if (fields.conviction !== undefined) row.conviction = fields.conviction;
+  if (fields.status !== undefined) row.status = fields.status;
+  if (fields.tickers !== undefined) row.tickers = fields.tickers;
+  if (fields.body !== undefined) row.body = fields.body as unknown as Json;
+  if (fields.evidence !== undefined) row.evidence = fields.evidence as unknown as Json;
+  if (fields.horizon !== undefined) row.horizon = fields.horizon;
+  if (fields.tags !== undefined) row.tags = fields.tags;
+  return row;
+}
 
 export function useTheses() {
-  const [theses, setTheses] = useState<Thesis[]>(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      return stored ? JSON.parse(stored) : DEMO_THESES;
-    } catch {
-      return DEMO_THESES;
-    }
-  });
+  const [theses, setTheses] = useState<Thesis[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(theses));
-  }, [theses]);
+  const load = useCallback(async () => {
+    const { data } = await supabase
+      .from("theses")
+      .select("*")
+      .order("created_at", { ascending: false });
+    setTheses((data ?? []).map(dbRowToThesis));
+    setIsLoading(false);
+  }, []);
 
-  const addThesis = (thesis: Omit<Thesis, "id" | "createdAt">) => {
-    const newThesis: Thesis = {
-      ...thesis,
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString().split("T")[0],
-    };
-    setTheses((prev) => [newThesis, ...prev]);
-    return newThesis;
+  useEffect(() => { load(); }, [load]);
+
+  const addThesis = async (fields: Omit<Thesis, "id" | "createdAt">) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase.from("theses").insert({
+      user_id: user.id,
+      title: fields.title,
+      summary: fields.summary,
+      conviction: fields.conviction,
+      status: fields.status,
+      tickers: fields.tickers,
+      body: fields.body as unknown as Json,
+      evidence: fields.evidence as unknown as Json,
+      horizon: fields.horizon,
+      tags: fields.tags,
+    });
+    load();
   };
 
-  const updateThesis = (id: string, updates: Partial<Thesis>) => {
-    setTheses((prev) => prev.map((t) => (t.id === id ? { ...t, ...updates } : t)));
+  const updateThesis = async (id: string, updates: Partial<Thesis>) => {
+    await supabase
+      .from("theses")
+      .update({ ...thesisToRow(updates), updated_at: new Date().toISOString() })
+      .eq("id", id);
+    load();
   };
 
-  const deleteThesis = (id: string) => {
-    setTheses((prev) => prev.filter((t) => t.id !== id));
+  const deleteThesis = async (id: string) => {
+    await supabase.from("theses").delete().eq("id", id);
+    load();
   };
 
-  return { theses, addThesis, updateThesis, deleteThesis };
+  return { theses, isLoading, addThesis, updateThesis, deleteThesis };
 }

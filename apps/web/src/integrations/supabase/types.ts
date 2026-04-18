@@ -145,6 +145,54 @@ export type Database = {
         }
         Relationships: []
       }
+      theses: {
+        Row: {
+          id: string
+          user_id: string
+          title: string
+          summary: string
+          conviction: string
+          status: string
+          tickers: string[]
+          body: Json
+          evidence: Json
+          horizon: string
+          tags: string[]
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          title: string
+          summary?: string
+          conviction?: string
+          status?: string
+          tickers?: string[]
+          body?: Json
+          evidence?: Json
+          horizon?: string
+          tags?: string[]
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          title?: string
+          summary?: string
+          conviction?: string
+          status?: string
+          tickers?: string[]
+          body?: Json
+          evidence?: Json
+          horizon?: string
+          tags?: string[]
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
