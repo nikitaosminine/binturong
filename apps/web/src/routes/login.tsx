@@ -27,16 +27,14 @@ export default function LoginPage() {
     setLoading(true);
     try {
       if (isSignUp) {
-        const { error: signUpError } = await supabase.auth.signUp({ email, password });
+        const { data, error: signUpError } = await supabase.auth.signUp({ email, password });
         if (signUpError && !signUpError.message.includes("already registered")) throw signUpError;
-        // Sign in immediately — works when email confirmation is disabled
-        const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-        if (!signInError) {
+        if (data.session) {
+          // Email confirmation is disabled — session returned immediately
           navigate("/portfolios");
-        } else if (signInError.message.toLowerCase().includes("not confirmed")) {
-          toast.success("Check your email to confirm your account");
         } else {
-          toast.error(signInError.message);
+          // Email confirmation required
+          toast.success("Check your email to confirm your account, then sign in.");
         }
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
