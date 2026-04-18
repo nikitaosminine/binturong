@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { TakeBadge } from "@/components/take-badge";
 import { Thesis, thesesForTicker, thesesForPortfolio } from "@/lib/thesis";
 import { EditHoldingModal } from "@/components/edit-holding-modal";
+import { AddHoldingModal } from "@/components/add-holding-modal";
 import { ThesisStack } from "@/components/thesis-stack/ThesisStack";
 import {
   ContextMenu,
@@ -160,6 +161,7 @@ export default function PortfolioDetailPage() {
 
   // Edit/delete modal
   const [editingHolding, setEditingHolding] = useState<Holding | null>(null);
+  const [addHoldingOpen, setAddHoldingOpen] = useState(false);
 
   const load = async () => {
     const [pRes, hRes] = await Promise.all([
@@ -299,7 +301,7 @@ export default function PortfolioDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" onClick={() => setAddHoldingOpen(true)}>
             <Plus className="h-3.5 w-3.5 mr-1.5" />Add holding
           </Button>
         </div>
@@ -520,6 +522,14 @@ export default function PortfolioDetailPage() {
           <SectorAllocationCard rows={rows} />
         </div>
       </div>
+
+      {/* Add holding modal */}
+      <AddHoldingModal
+        open={addHoldingOpen}
+        onOpenChange={setAddHoldingOpen}
+        portfolioId={portfolioId!}
+        onAdded={() => { setAddHoldingOpen(false); load(); }}
+      />
 
       {/* Edit holding modal */}
       {editingHolding && (
