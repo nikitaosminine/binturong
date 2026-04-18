@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { BarChart3 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
@@ -55,15 +55,29 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <Card className="w-full max-w-sm border-border/50 bg-card">
-        <CardHeader className="text-center space-y-2">
-          <CardTitle className="text-2xl font-bold tracking-tight">Folio</CardTitle>
-          <CardDescription>{isSignUp ? "Create your account" : "Sign in to your account"}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Button variant="outline" className="w-full" onClick={handleGoogleLogin}>
-            <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
+    <div className="min-h-screen flex items-center justify-center px-4 bg-gradient-to-b from-background to-[oklch(0.12_0.03_264)]">
+      <div className="w-full max-w-sm">
+        {/* Logo */}
+        <div className="flex items-center gap-2 justify-center mb-6">
+          <div className="h-8 w-8 rounded-md bg-primary/20 border border-primary/30 flex items-center justify-center text-primary">
+            <BarChart3 className="h-4 w-4" />
+          </div>
+          <span className="text-lg font-semibold tracking-tight">Binturong</span>
+        </div>
+
+        {/* Card */}
+        <div className="rounded-xl border border-border/50 bg-card p-6">
+          <div className="text-center space-y-1 mb-5">
+            <h1 className="text-xl font-semibold tracking-tight">
+              {isSignUp ? "Create your account" : "Welcome back"}
+            </h1>
+            <p className="text-xs text-muted-foreground">
+              {isSignUp ? "Start tracking your portfolio in minutes." : "Sign in to continue to Binturong."}
+            </p>
+          </div>
+
+          <Button variant="outline" className="w-full mb-4" onClick={handleGoogleLogin}>
+            <svg className="h-4 w-4 mr-2" viewBox="0 0 24 24">
               <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
               <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
               <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
@@ -72,37 +86,59 @@ export default function LoginPage() {
             Continue with Google
           </Button>
 
-          <div className="relative">
+          <div className="relative my-4">
             <div className="absolute inset-0 flex items-center">
               <span className="w-full border-t border-border/50" />
             </div>
-            <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-card px-2 text-muted-foreground">or</span>
+            <div className="relative flex justify-center">
+              <span className="bg-card px-2 text-[10px] uppercase tracking-widest text-muted-foreground">or</span>
             </div>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-3">
             <div className="space-y-1.5">
               <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required />
+              <Input
+                id="email"
+                type="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
+              <Input
+                id="password"
+                type="password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={6}
+              />
             </div>
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Loading..." : isSignUp ? "Create account" : "Sign in"}
+              {loading ? "Loading…" : isSignUp ? "Create account" : "Sign in"}
             </Button>
           </form>
 
-          <p className="text-center text-xs text-muted-foreground">
+          <p className="text-center text-xs text-muted-foreground mt-4">
             {isSignUp ? "Already have an account?" : "Don't have an account?"}{" "}
-            <button onClick={() => setIsSignUp(!isSignUp)} className="text-primary hover:underline">
+            <button
+              onClick={() => setIsSignUp(!isSignUp)}
+              className="text-primary hover:underline"
+            >
               {isSignUp ? "Sign in" : "Sign up"}
             </button>
           </p>
-        </CardContent>
-      </Card>
+        </div>
+
+        <p className="text-center text-[10px] text-muted-foreground mt-4">
+          Demo environment · No real data or orders.
+        </p>
+      </div>
     </div>
   );
 }

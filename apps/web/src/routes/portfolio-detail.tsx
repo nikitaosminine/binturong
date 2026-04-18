@@ -1,15 +1,20 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Link, useParams, useOutletContext } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { supabase } from "@/integrations/supabase/client";
-import { MOCK_PRICES, generateChartData } from "@/lib/mock-data";
+import { MOCK_PRICES, generateChartData, getSector, get1DPerf } from "@/lib/mock-data";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { toast } from "sonner";
 import { TakeBadge } from "@/components/take-badge";
-import { Thesis } from "@/lib/thesis";
-import { thesesForTicker } from "@/lib/thesis";
+import { Thesis, thesesForTicker } from "@/lib/thesis";
+import { EditHoldingModal } from "@/components/edit-holding-modal";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuCheckboxItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 
 interface Holding {
   id: string;
@@ -28,178 +33,485 @@ interface ThesisContext {
   openModal: (thesis?: Thesis) => void;
 }
 
+function fmt$(n: number) {
+  return n.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 });
+}
+function fmtPct(n: number) {
+  return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
+}
+
+function StatCard({ label, value, tone = "neutral", muted = false }: {
+  label: string; value: string; tone?: "positive" | "negative" | "neutral"; muted?: boolean;
+}) {
+  const cls = tone === "positive" ? "text-positive" : tone === "negative" ? "text-negative" : "text-foreground";
+  return (
+    <div className="rounded-lg border border-border/50 bg-card p-4">
+      <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{label}</div>
+      <div className={`mt-1.5 text-lg font-semibold tabular-nums font-mono ${muted ? "text-foreground/70" : cls}`}>{value}</div>
+    </div>
+  );
+}
+
+// Sector allocation sidebar card
+function SectorAllocationCard({ rows }: { rows: RowData[] }) {
+  const total = rows.reduce((s, r) => s + r.total, 0);
+  const bySector: Record<string, number> = {};
+  rows.forEach((r) => { bySector[r.sector] = (bySector[r.sector] || 0) + r.total; });
+  const entries = Object.entries(bySector).sort((a, b) => b[1] - a[1]);
+  const colors = [
+    "oklch(0.65 0.19 250)", "oklch(0.70 0.15 160)", "oklch(0.75 0.18 70)",
+    "oklch(0.65 0.22 300)", "oklch(0.65 0.24 16)", "oklch(0.70 0.10 200)",
+  ];
+  return (
+    <div className="rounded-lg border border-border/50 bg-card p-4">
+      <div className="text-[11px] uppercase tracking-widest text-muted-foreground mb-3">Sector allocation</div>
+      {total > 0 ? (
+        <>
+          <div className="flex h-2 rounded-full overflow-hidden bg-[oklch(1_0_0/5%)]">
+            {entries.map(([s, v], i) => (
+              <div key={s} style={{ width: `${(v / total) * 100}%`, background: colors[i % colors.length] }} />
+            ))}
+          </div>
+          <div className="mt-3 flex flex-col gap-1.5">
+            {entries.map(([s, v], i) => (
+              <div key={s} className="flex items-center gap-2 text-[11px]">
+                <span className="h-2 w-2 rounded-sm shrink-0" style={{ background: colors[i % colors.length] }} />
+                <span className="flex-1 truncate">{s}</span>
+                <span className="font-mono tabular-nums text-muted-foreground">{((v / total) * 100).toFixed(1)}%</span>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <p className="text-xs text-muted-foreground">No holdings data.</p>
+      )}
+    </div>
+  );
+}
+
+// Column definitions
+const ALL_COLUMNS = [
+  { key: "name",    label: "Asset",     align: "left"  },
+  { key: "qty",     label: "Qty",       align: "right" },
+  { key: "cur",     label: "Current",   align: "right" },
+  { key: "buy",     label: "Cost",      align: "right" },
+  { key: "total",   label: "Value",     align: "right" },
+  { key: "gl",      label: "Gain/Loss", align: "right" },
+  { key: "weight",  label: "Weight",    align: "right" },
+  { key: "sector",  label: "Sector",    align: "left"  },
+  { key: "perf1D",  label: "1D",        align: "right" },
+  { key: "perfYTD", label: "YTD",       align: "right" },
+  { key: "take",    label: "Take",      align: "center"},
+] as const;
+
+type ColKey = typeof ALL_COLUMNS[number]["key"];
+
+interface RowData {
+  id: string;
+  ticker: string;
+  name: string;
+  isin: string | null;
+  qty: number;
+  cur: number;
+  buy: number;
+  total: number;
+  gl: number;
+  weight: number;
+  sector: string;
+  perf1D: number;
+  perfYTD: number;
+}
+
+const DEFAULT_ORDER: ColKey[] = ALL_COLUMNS.map((c) => c.key);
+
+function loadLS<T>(key: string, fallback: T): T {
+  try { return JSON.parse(localStorage.getItem(key) || "null") ?? fallback; } catch { return fallback; }
+}
+function saveLS(key: string, val: unknown) {
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch { /* ignore */ }
+}
+
 export default function PortfolioDetailPage() {
   const { portfolioId } = useParams<{ portfolioId: string }>();
   const { theses, openDrawer } = useOutletContext<ThesisContext>();
   const [portfolio, setPortfolio] = useState<{ name: string; description: string | null } | null>(null);
   const [holdings, setHoldings] = useState<Holding[]>([]);
-  const [period, setPeriod] = useState<"1D" | "1M" | "1Y">("1M");
+  const [period, setPeriod] = useState<string>("1M");
   const [loading, setLoading] = useState(true);
 
+  // Sort
+  const [sortBy, setSortBy] = useState<string>("total");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  // Column visibility
+  const [hiddenCols, setHiddenCols] = useState<Set<ColKey>>(() =>
+    new Set<ColKey>(loadLS(`binturong.columns.hidden.${portfolioId}`, []))
+  );
+
+  // Column order
+  const [colOrder, setColOrder] = useState<ColKey[]>(() =>
+    loadLS(`binturong.columns.order.${portfolioId}`, DEFAULT_ORDER)
+  );
+
+  // Drag state
+  const dragKey = useRef<ColKey | null>(null);
+
+  // Edit/delete modal
+  const [editingHolding, setEditingHolding] = useState<Holding | null>(null);
+
+  const load = async () => {
+    const [pRes, hRes] = await Promise.all([
+      supabase.from("portfolios").select("name, description").eq("id", portfolioId!).single(),
+      supabase.from("holdings").select("*").eq("portfolio_id", portfolioId!),
+    ]);
+    if (pRes.error) toast.error("Failed to load portfolio");
+    else setPortfolio(pRes.data);
+    if (!hRes.error) setHoldings(hRes.data || []);
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, [portfolioId]);
+
+  // Persist hidden cols
   useEffect(() => {
-    const load = async () => {
-      const [pRes, hRes] = await Promise.all([
-        supabase.from("portfolios").select("name, description").eq("id", portfolioId!).single(),
-        supabase.from("holdings").select("*").eq("portfolio_id", portfolioId!),
-      ]);
-      if (pRes.error) toast.error("Failed to load portfolio");
-      else setPortfolio(pRes.data);
-      if (!hRes.error) setHoldings(hRes.data || []);
-      setLoading(false);
-    };
-    load();
-  }, [portfolioId]);
+    saveLS(`binturong.columns.hidden.${portfolioId}`, Array.from(hiddenCols));
+  }, [hiddenCols, portfolioId]);
+
+  // Persist col order
+  useEffect(() => {
+    saveLS(`binturong.columns.order.${portfolioId}`, colOrder);
+  }, [colOrder, portfolioId]);
 
   const chartData = useMemo(() => generateChartData(period), [period]);
 
-  const totalValue = useMemo(() => holdings.reduce((sum, h) => {
-    const price = MOCK_PRICES[h.ticker] || h.purchase_price;
-    return sum + price * h.quantity;
-  }, 0), [holdings]);
+  const totalValue = useMemo(() =>
+    holdings.reduce((s, h) => s + (MOCK_PRICES[h.ticker] ?? h.purchase_price) * h.quantity, 0),
+    [holdings]
+  );
+  const totalCost = useMemo(() =>
+    holdings.reduce((s, h) => s + h.purchase_price * h.quantity, 0),
+    [holdings]
+  );
+  const totalPL  = totalValue - totalCost;
+  const returnPct = totalCost > 0 ? (totalPL / totalCost) * 100 : 0;
 
-  if (loading) {
-    return <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">Loading...</div>;
-  }
+  const rows: RowData[] = useMemo(() => {
+    const r = holdings.map((h) => {
+      const cur   = MOCK_PRICES[h.ticker] ?? h.purchase_price;
+      const total = cur * h.quantity;
+      const gl    = (cur - h.purchase_price) * h.quantity;
+      const weight = totalValue > 0 ? (total / totalValue) * 100 : 0;
+      const perf1D = get1DPerf(h.ticker, h.quantity);
+      const perfYTD = h.purchase_price > 0 ? ((cur - h.purchase_price) / h.purchase_price) * 100 : 0;
+      return {
+        id: h.id, ticker: h.ticker, name: h.name, isin: h.isin,
+        qty: h.quantity, cur, buy: h.purchase_price, total, gl, weight,
+        sector: getSector(h.ticker), perf1D, perfYTD,
+        // keep original for modal
+        _raw: h,
+      } as RowData & { _raw: Holding };
+    });
 
-  if (!portfolio) {
-    return (
-      <div className="text-center py-24">
-        <p className="text-muted-foreground">Portfolio not found</p>
-        <Link to="/portfolios" className="text-primary text-sm hover:underline mt-2 inline-block">Back to portfolios</Link>
-      </div>
-    );
-  }
+    r.sort((a, b) => {
+      const dir = sortDir === "asc" ? 1 : -1;
+      const av = (a as Record<string, unknown>)[sortBy];
+      const bv = (b as Record<string, unknown>)[sortBy];
+      if (typeof av === "string" && typeof bv === "string") return av.localeCompare(bv) * dir;
+      return (((av as number) ?? 0) - ((bv as number) ?? 0)) * dir;
+    });
+    return r;
+  }, [holdings, totalValue, sortBy, sortDir]);
+
+  const visibleCols = colOrder.filter((k) => !hiddenCols.has(k));
+
+  const handleSort = (key: string) => {
+    if (key === "take") return;
+    if (sortBy === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortBy(key); setSortDir("desc"); }
+  };
+
+  const toggleHide = (key: ColKey) => {
+    setHiddenCols((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const handleDragStart = (key: ColKey) => { dragKey.current = key; };
+  const handleDrop = (targetKey: ColKey) => {
+    if (!dragKey.current || dragKey.current === targetKey) return;
+    setColOrder((prev) => {
+      const next = [...prev];
+      const fromIdx = next.indexOf(dragKey.current!);
+      const toIdx   = next.indexOf(targetKey);
+      next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, dragKey.current!);
+      return next;
+    });
+    dragKey.current = null;
+  };
+
+  const handleDelete = async (holding: Holding) => {
+    if (!confirm(`Remove ${holding.name} from this portfolio?`)) return;
+    const { error } = await supabase.from("holdings").delete().eq("id", holding.id);
+    if (error) toast.error("Failed to delete holding");
+    else { toast.success("Holding removed"); load(); }
+  };
+
+  if (loading) return <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">Loading…</div>;
+
+  if (!portfolio) return (
+    <div className="text-center py-24">
+      <p className="text-muted-foreground">Portfolio not found</p>
+      <Link to="/portfolios" className="text-primary text-sm hover:underline mt-2 inline-block">Back to portfolios</Link>
+    </div>
+  );
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
-      <div className="flex items-center gap-3">
-        <Link to="/portfolios">
-          <Button variant="ghost" size="icon" className="h-8 w-8">
-            <ArrowLeft className="h-4 w-4" />
+    <div className="max-w-6xl mx-auto space-y-5">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <Link to="/portfolios">
+            <Button variant="ghost" size="icon" className="h-8 w-8">
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+          </Link>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-semibold tracking-tight">{portfolio.name}</h1>
+              <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] bg-secondary text-secondary-foreground">
+                {holdings.length} holdings
+              </span>
+            </div>
+            {portfolio.description && (
+              <p className="text-xs text-muted-foreground mt-0.5">{portfolio.description}</p>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm">
+            <Plus className="h-3.5 w-3.5 mr-1.5" />Add holding
           </Button>
-        </Link>
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">{portfolio.name}</h1>
-          {portfolio.description && <p className="text-sm text-muted-foreground">{portfolio.description}</p>}
         </div>
       </div>
 
+      {/* Stats strip */}
+      <div className="grid grid-cols-4 gap-3">
+        <StatCard label="Total value"    value={fmt$(totalValue)} />
+        <StatCard label="Cost basis"     value={fmt$(totalCost)} muted />
+        <StatCard label="Unrealized P/L" value={fmt$(totalPL)}    tone={totalPL >= 0 ? "positive" : "negative"} />
+        <StatCard label="Return"         value={fmtPct(returnPct)} tone={returnPct >= 0 ? "positive" : "negative"} />
+      </div>
+
+      {/* Chart */}
       <div className="rounded-lg border border-border/50 bg-card p-4">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-3">
           <div>
-            <p className="text-xs text-muted-foreground">Portfolio Value</p>
-            <p className="text-2xl font-bold tracking-tight mt-0.5">${totalValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            <div className="text-[11px] uppercase tracking-widest text-muted-foreground">Portfolio value</div>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className="text-2xl font-semibold font-mono tabular-nums">{fmt$(totalValue)}</span>
+              <span className={`text-xs font-mono ${totalPL >= 0 ? "text-positive" : "text-negative"}`}>
+                {fmt$(totalPL)} {fmtPct(returnPct)}
+              </span>
+            </div>
           </div>
-          <div className="flex gap-1">
-            {(["1D", "1M", "1Y"] as const).map((p) => (
-              <Button
+          <div className="flex items-center rounded-md border border-border overflow-hidden">
+            {(["1D", "1W", "1M", "1Y", "ALL"] as const).map((p) => (
+              <button
                 key={p}
-                variant={period === p ? "secondary" : "ghost"}
-                size="sm"
-                className="h-7 px-2.5 text-xs"
                 onClick={() => setPeriod(p)}
+                className={`px-2.5 h-7 text-[11px] font-medium transition-colors ${
+                  period === p ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                }`}
               >
                 {p}
-              </Button>
+              </button>
             ))}
           </div>
         </div>
         <div className="h-64">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={chartData}>
-              <XAxis
-                dataKey="date"
-                stroke="oklch(0.60 0.02 264)"
-                fontSize={11}
-                tickLine={false}
-                axisLine={false}
-                interval="preserveStartEnd"
-              />
-              <YAxis
-                stroke="oklch(0.60 0.02 264)"
-                fontSize={11}
-                tickLine={false}
-                axisLine={false}
+              <XAxis dataKey="date" stroke="oklch(0.60 0.02 264)" fontSize={11} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+              <YAxis stroke="oklch(0.60 0.02 264)" fontSize={11} tickLine={false} axisLine={false}
                 tickFormatter={(v: number) => `$${(v / 1000).toFixed(1)}k`}
-                domain={["dataMin - 500", "dataMax + 500"]}
-              />
+                domain={["dataMin - 500", "dataMax + 500"]} />
               <Tooltip
-                contentStyle={{
-                  backgroundColor: "oklch(0.18 0.03 264)",
-                  border: "1px solid oklch(1 0 0 / 8%)",
-                  borderRadius: "8px",
-                  color: "oklch(0.96 0.005 264)",
-                  fontSize: "12px",
-                }}
+                contentStyle={{ backgroundColor: "oklch(0.18 0.03 264)", border: "1px solid oklch(1 0 0 / 8%)", borderRadius: "8px", color: "oklch(0.96 0.005 264)", fontSize: "12px" }}
               />
-              <Line type="monotone" dataKey="value" stroke="oklch(0.65 0.19 250)" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="value" stroke="oklch(0.65 0.19 250)" strokeWidth={2} dot={false} isAnimationActive={false} />
             </LineChart>
           </ResponsiveContainer>
         </div>
       </div>
 
-      <div className="rounded-lg border border-border/50">
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead className="text-xs">Name</TableHead>
-              <TableHead className="text-xs">ISIN</TableHead>
-              <TableHead className="text-xs text-right">Qty</TableHead>
-              <TableHead className="text-xs text-right">Price</TableHead>
-              <TableHead className="text-xs text-right">Cost</TableHead>
-              <TableHead className="text-xs text-right">Value</TableHead>
-              <TableHead className="text-xs text-right">Weight</TableHead>
-              <TableHead className="text-xs text-right">Perf 1D</TableHead>
-              <TableHead className="text-xs text-right">Perf YTD</TableHead>
-              <TableHead className="text-xs text-center">Take</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {holdings.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={10} className="text-center text-sm text-muted-foreground py-8">
-                  No holdings in this portfolio
-                </TableCell>
-              </TableRow>
-            ) : (
-              holdings.map((h) => {
-                const currentPrice = MOCK_PRICES[h.ticker] || h.purchase_price;
-                const totalHoldingValue = currentPrice * h.quantity;
-                const weight = totalValue > 0 ? (totalHoldingValue / totalValue) * 100 : 0;
-                const perf1D = ((Math.random() - 0.5) * 4).toFixed(2);
-                const perfYTD = (((currentPrice - h.purchase_price) / h.purchase_price) * 100).toFixed(2);
-                const tickerTheses = thesesForTicker(theses, h.ticker);
+      {/* Holdings + sidebar */}
+      <div className="grid grid-cols-3 gap-4">
+        {/* Holdings table */}
+        <div className="col-span-2">
+          <div className="rounded-lg border border-border/50 overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              <div className="text-[11px] uppercase tracking-widest text-muted-foreground">Holdings</div>
+              <div className="text-[11px] text-muted-foreground font-mono">{rows.length} positions</div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border">
+                    {visibleCols.map((key) => {
+                      const col = ALL_COLUMNS.find((c) => c.key === key)!;
+                      const active = sortBy === key;
+                      return (
+                        <ContextMenu key={key}>
+                          <ContextMenuTrigger asChild>
+                            <th
+                              draggable
+                              onDragStart={() => handleDragStart(key)}
+                              onDragOver={(e) => e.preventDefault()}
+                              onDrop={() => handleDrop(key)}
+                              onClick={() => handleSort(key)}
+                              className={`text-[10px] font-medium uppercase tracking-wider text-muted-foreground cursor-pointer select-none px-3 py-2 whitespace-nowrap ${col.align === "right" ? "text-right" : col.align === "center" ? "text-center" : "text-left"} ${active ? "text-foreground" : ""}`}
+                            >
+                              {col.label}
+                              {active && <span className="ml-1 text-[9px]">{sortDir === "asc" ? "↑" : "↓"}</span>}
+                            </th>
+                          </ContextMenuTrigger>
+                          <ContextMenuContent className="w-48">
+                            {ALL_COLUMNS.map((c) => (
+                              <ContextMenuCheckboxItem
+                                key={c.key}
+                                checked={!hiddenCols.has(c.key)}
+                                onCheckedChange={() => toggleHide(c.key)}
+                              >
+                                {c.label}
+                              </ContextMenuCheckboxItem>
+                            ))}
+                          </ContextMenuContent>
+                        </ContextMenu>
+                      );
+                    })}
+                    <th className="w-16 px-3 py-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.length === 0 ? (
+                    <tr>
+                      <td colSpan={visibleCols.length + 1} className="text-center text-sm text-muted-foreground py-10">
+                        No holdings — add one to get started
+                      </td>
+                    </tr>
+                  ) : (
+                    rows.map((r) => {
+                      const raw = holdings.find((h) => h.id === r.id)!;
+                      const tickerTheses = thesesForTicker(theses, r.ticker);
+                      return (
+                        <tr key={r.id} className="border-b border-border last:border-0 hover:bg-[oklch(1_0_0/2%)] transition-colors group">
+                          {visibleCols.map((key) => {
+                            const col = ALL_COLUMNS.find((c) => c.key === key)!;
+                            const alignCls = col.align === "right" ? "text-right" : col.align === "center" ? "text-center" : "";
+                            return (
+                              <td key={key} className={`px-3 py-2.5 text-[13px] ${alignCls}`}>
+                                {key === "name" && (
+                                  <div className="flex items-center gap-2.5">
+                                    <div className="h-7 w-7 rounded-md bg-[oklch(1_0_0/5%)] border border-border flex items-center justify-center shrink-0">
+                                      <span className="font-mono text-[10px] font-semibold">{r.ticker.slice(0, 2)}</span>
+                                    </div>
+                                    <div className="min-w-0">
+                                      <div className="text-[13px] font-medium truncate">{r.name}</div>
+                                      <div className="text-[11px] text-muted-foreground font-mono">{r.ticker}{r.isin ? ` · ${r.isin}` : ""}</div>
+                                    </div>
+                                  </div>
+                                )}
+                                {key === "qty"     && <span className="font-mono tabular-nums">{r.qty}</span>}
+                                {key === "cur"     && <span className="font-mono tabular-nums">{fmt$(r.cur)}</span>}
+                                {key === "buy"     && <span className="font-mono tabular-nums text-muted-foreground">{fmt$(r.buy)}</span>}
+                                {key === "total"   && <span className="font-mono tabular-nums font-medium">{fmt$(r.total)}</span>}
+                                {key === "gl"      && (
+                                  <span className={`font-mono tabular-nums ${r.gl >= 0 ? "text-positive" : "text-negative"}`}>
+                                    {r.gl >= 0 ? "+" : ""}{fmt$(r.gl)}
+                                  </span>
+                                )}
+                                {key === "weight"  && <span className="font-mono tabular-nums text-muted-foreground">{r.weight.toFixed(1)}%</span>}
+                                {key === "sector"  && <span className="text-muted-foreground">{r.sector}</span>}
+                                {key === "perf1D"  && (
+                                  <span className={`font-mono tabular-nums ${r.perf1D >= 0 ? "text-positive" : "text-negative"}`}>
+                                    {fmtPct(r.perf1D)}
+                                  </span>
+                                )}
+                                {key === "perfYTD" && (
+                                  <span className={`font-mono tabular-nums ${r.perfYTD >= 0 ? "text-positive" : "text-negative"}`}>
+                                    {fmtPct(r.perfYTD)}
+                                  </span>
+                                )}
+                                {key === "take" && (
+                                  <div className="flex justify-center">
+                                    <TakeBadge theses={tickerTheses} onOpen={openDrawer} />
+                                  </div>
+                                )}
+                              </td>
+                            );
+                          })}
+                          {/* Row actions */}
+                          <td className="px-3 py-2.5">
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Button
+                                variant="ghost" size="icon"
+                                className="h-6 w-6"
+                                onClick={() => setEditingHolding(raw)}
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                variant="ghost" size="icon"
+                                className="h-6 w-6 text-destructive hover:text-destructive"
+                                onClick={() => handleDelete(raw)}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
 
-                return (
-                  <TableRow key={h.id}>
-                    <TableCell>
-                      <div>
-                        <span className="font-medium text-sm">{h.name}</span>
-                        <span className="text-xs text-muted-foreground ml-1.5">{h.ticker}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground font-mono">{h.isin || "—"}</TableCell>
-                    <TableCell className="text-right text-sm">{h.quantity}</TableCell>
-                    <TableCell className="text-right text-sm">${currentPrice.toFixed(2)}</TableCell>
-                    <TableCell className="text-right text-sm">${h.purchase_price.toFixed(2)}</TableCell>
-                    <TableCell className="text-right text-sm font-medium">${totalHoldingValue.toFixed(2)}</TableCell>
-                    <TableCell className="text-right text-sm text-muted-foreground">{weight.toFixed(1)}%</TableCell>
-                    <TableCell className={`text-right text-sm ${parseFloat(perf1D) >= 0 ? "text-positive" : "text-negative"}`}>
-                      {parseFloat(perf1D) >= 0 ? "+" : ""}{perf1D}%
-                    </TableCell>
-                    <TableCell className={`text-right text-sm ${parseFloat(perfYTD) >= 0 ? "text-positive" : "text-negative"}`}>
-                      {parseFloat(perfYTD) >= 0 ? "+" : ""}{perfYTD}%
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <TakeBadge theses={tickerTheses} onOpen={openDrawer} />
-                    </TableCell>
-                  </TableRow>
-                );
-              })
-            )}
-          </TableBody>
-        </Table>
+        {/* Right sidebar */}
+        <div className="col-span-1 flex flex-col gap-4">
+          {/* Risk Watch stub */}
+          <div className="rounded-lg border border-border/50 bg-card p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-[11px] uppercase tracking-widest text-muted-foreground">Risk watch</div>
+              <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] bg-amber-500/10 text-amber-400 font-medium">
+                coming soon
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              AI-powered risk monitoring will surface issues as markets move.
+            </p>
+          </div>
+
+          {/* Sector allocation */}
+          <SectorAllocationCard rows={rows} />
+        </div>
       </div>
+
+      {/* Edit holding modal */}
+      {editingHolding && (
+        <EditHoldingModal
+          open={!!editingHolding}
+          onOpenChange={(open) => { if (!open) setEditingHolding(null); }}
+          holding={editingHolding}
+          onUpdated={() => { setEditingHolding(null); load(); }}
+        />
+      )}
     </div>
   );
 }
