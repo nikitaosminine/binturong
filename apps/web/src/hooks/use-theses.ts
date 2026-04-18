@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Thesis, ThesisBodyBlock, ThesisEvidence, ThesisConviction, ThesisStatus } from "@/lib/thesis";
 import { supabase } from "@/integrations/supabase/client";
 import { Json } from "@/integrations/supabase/types";
+import { toast } from "sonner";
 
 function dbRowToThesis(row: {
   id: string;
@@ -62,10 +63,11 @@ export function useTheses() {
 
   const addThesis = async (fields: Omit<Thesis, "id" | "createdAt">) => {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    await supabase.from("theses").insert({
+    if (!user) { toast.error("Not authenticated"); return; }
+    const { error } = await supabase.from("theses").insert({
       user_id: user.id,
       title: fields.title,
+      content: fields.summary ?? "",
       summary: fields.summary,
       conviction: fields.conviction,
       status: fields.status,
@@ -75,19 +77,22 @@ export function useTheses() {
       horizon: fields.horizon,
       tags: fields.tags,
     });
+    if (error) { toast.error(error.message); return; }
     load();
   };
 
   const updateThesis = async (id: string, updates: Partial<Thesis>) => {
-    await supabase
+    const { error } = await supabase
       .from("theses")
       .update({ ...thesisToRow(updates), updated_at: new Date().toISOString() })
       .eq("id", id);
+    if (error) { toast.error(error.message); return; }
     load();
   };
 
   const deleteThesis = async (id: string) => {
-    await supabase.from("theses").delete().eq("id", id);
+    const { error } = await supabase.from("theses").delete().eq("id", id);
+    if (error) { toast.error(error.message); return; }
     load();
   };
 
