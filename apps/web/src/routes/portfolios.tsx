@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { CreateCsvModal } from "@/components/create-csv-modal";
 import { CreateManualModal } from "@/components/create-manual-modal";
+import { EditPortfolioModal } from "@/components/edit-portfolio-modal";
 import { MOCK_PRICES, generateChartData } from "@/lib/mock-data";
 import { toast } from "sonner";
 import { LineChart, Line, ResponsiveContainer } from "recharts";
@@ -208,6 +209,8 @@ export default function PortfoliosPage() {
   const [loading, setLoading] = useState(true);
   const [csvOpen, setCsvOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingPortfolio, setEditingPortfolio] = useState<Portfolio | null>(null);
 
   const fetchPortfolios = async () => {
     const { data, error } = await supabase
@@ -225,22 +228,9 @@ export default function PortfoliosPage() {
   useEffect(() => { fetchPortfolios(); }, []);
 
   const onCreated = () => { setCsvOpen(false); setManualOpen(false); fetchPortfolios(); };
-  const handleEditPortfolio = async (portfolio: Portfolio) => {
-    const name = prompt("Edit portfolio name", portfolio.name)?.trim();
-    if (!name || name === portfolio.name) return;
-
-    const { error } = await supabase
-      .from("portfolios")
-      .update({ name })
-      .eq("id", portfolio.id);
-
-    if (error) {
-      toast.error("Failed to update portfolio");
-      return;
-    }
-
-    toast.success("Portfolio updated");
-    fetchPortfolios();
+  const handleEditPortfolio = (portfolio: Portfolio) => {
+    setEditingPortfolio(portfolio);
+    setEditOpen(true);
   };
 
   const handleDeletePortfolio = async (portfolio: Portfolio) => {
@@ -336,6 +326,15 @@ export default function PortfoliosPage() {
 
       <CreateCsvModal    open={csvOpen}    onOpenChange={setCsvOpen}    onCreated={onCreated} />
       <CreateManualModal open={manualOpen} onOpenChange={setManualOpen} onCreated={onCreated} />
+      <EditPortfolioModal
+        open={editOpen}
+        onOpenChange={(open) => {
+          setEditOpen(open);
+          if (!open) setEditingPortfolio(null);
+        }}
+        portfolio={editingPortfolio}
+        onSaved={fetchPortfolios}
+      />
     </div>
   );
 }
