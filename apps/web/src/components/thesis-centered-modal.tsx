@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { X, Pencil, Trash2, Check } from "lucide-react";
+import { DialogClose } from "@/components/ui/dialog";
 import {
   Thesis,
   ThesisConviction,
@@ -167,7 +168,7 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, onSave, onDele
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl max-h-[88vh] flex flex-col p-0 gap-0 overflow-hidden">
+      <DialogContent className="sm:max-w-3xl max-h-[88vh] flex flex-col p-0 gap-0 overflow-hidden [&>button.absolute]:hidden">
 
         {/* ── VIEW mode ── */}
         {mode === "view" && thesis && (
@@ -195,6 +196,11 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, onSave, onDele
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 )}
+                <DialogClose asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </DialogClose>
               </div>
             </div>
 
@@ -272,6 +278,11 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, onSave, onDele
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-border/50 shrink-0">
               <h2 className="text-base font-semibold">{isCreate ? "New take" : "Edit take"}</h2>
+              <DialogClose asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </DialogClose>
             </div>
 
             {/* Body */}
