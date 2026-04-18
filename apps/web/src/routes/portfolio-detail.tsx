@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useOutletContext } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -7,6 +7,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { MOCK_PRICES, generateChartData } from "@/lib/mock-data";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { toast } from "sonner";
+import { TakeBadge } from "@/components/take-badge";
+import { Thesis } from "@/lib/thesis";
+import { thesesForTicker } from "@/lib/thesis";
 
 interface Holding {
   id: string;
@@ -19,8 +22,15 @@ interface Holding {
   purchase_date: string;
 }
 
+interface ThesisContext {
+  theses: Thesis[];
+  openDrawer: (id: string) => void;
+  openModal: (thesis?: Thesis) => void;
+}
+
 export default function PortfolioDetailPage() {
   const { portfolioId } = useParams<{ portfolioId: string }>();
+  const { theses, openDrawer } = useOutletContext<ThesisContext>();
   const [portfolio, setPortfolio] = useState<{ name: string; description: string | null } | null>(null);
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [period, setPeriod] = useState<"1D" | "1M" | "1Y">("1M");
@@ -41,6 +51,11 @@ export default function PortfolioDetailPage() {
   }, [portfolioId]);
 
   const chartData = useMemo(() => generateChartData(period), [period]);
+
+  const totalValue = useMemo(() => holdings.reduce((sum, h) => {
+    const price = MOCK_PRICES[h.ticker] || h.purchase_price;
+    return sum + price * h.quantity;
+  }, 0), [holdings]);
 
   if (loading) {
     return <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">Loading...</div>;
@@ -71,7 +86,10 @@ export default function PortfolioDetailPage() {
 
       <div className="rounded-lg border border-border/50 bg-card p-4">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-medium text-muted-foreground">Portfolio Value</h2>
+          <div>
+            <p className="text-xs text-muted-foreground">Portfolio Value</p>
+            <p className="text-2xl font-bold tracking-tight mt-0.5">${totalValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+          </div>
           <div className="flex gap-1">
             {(["1D", "1M", "1Y"] as const).map((p) => (
               <Button
@@ -127,26 +145,30 @@ export default function PortfolioDetailPage() {
               <TableHead className="text-xs">Name</TableHead>
               <TableHead className="text-xs">ISIN</TableHead>
               <TableHead className="text-xs text-right">Qty</TableHead>
-              <TableHead className="text-xs text-right">Current Price</TableHead>
+              <TableHead className="text-xs text-right">Price</TableHead>
               <TableHead className="text-xs text-right">Cost</TableHead>
-              <TableHead className="text-xs text-right">Total Value</TableHead>
+              <TableHead className="text-xs text-right">Value</TableHead>
+              <TableHead className="text-xs text-right">Weight</TableHead>
               <TableHead className="text-xs text-right">Perf 1D</TableHead>
               <TableHead className="text-xs text-right">Perf YTD</TableHead>
+              <TableHead className="text-xs text-center">Take</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {holdings.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center text-sm text-muted-foreground py-8">
+                <TableCell colSpan={10} className="text-center text-sm text-muted-foreground py-8">
                   No holdings in this portfolio
                 </TableCell>
               </TableRow>
             ) : (
               holdings.map((h) => {
                 const currentPrice = MOCK_PRICES[h.ticker] || h.purchase_price;
-                const totalValue = currentPrice * h.quantity;
+                const totalHoldingValue = currentPrice * h.quantity;
+                const weight = totalValue > 0 ? (totalHoldingValue / totalValue) * 100 : 0;
                 const perf1D = ((Math.random() - 0.5) * 4).toFixed(2);
                 const perfYTD = (((currentPrice - h.purchase_price) / h.purchase_price) * 100).toFixed(2);
+                const tickerTheses = thesesForTicker(theses, h.ticker);
 
                 return (
                   <TableRow key={h.id}>
@@ -160,12 +182,16 @@ export default function PortfolioDetailPage() {
                     <TableCell className="text-right text-sm">{h.quantity}</TableCell>
                     <TableCell className="text-right text-sm">${currentPrice.toFixed(2)}</TableCell>
                     <TableCell className="text-right text-sm">${h.purchase_price.toFixed(2)}</TableCell>
-                    <TableCell className="text-right text-sm font-medium">${totalValue.toFixed(2)}</TableCell>
+                    <TableCell className="text-right text-sm font-medium">${totalHoldingValue.toFixed(2)}</TableCell>
+                    <TableCell className="text-right text-sm text-muted-foreground">{weight.toFixed(1)}%</TableCell>
                     <TableCell className={`text-right text-sm ${parseFloat(perf1D) >= 0 ? "text-positive" : "text-negative"}`}>
                       {parseFloat(perf1D) >= 0 ? "+" : ""}{perf1D}%
                     </TableCell>
                     <TableCell className={`text-right text-sm ${parseFloat(perfYTD) >= 0 ? "text-positive" : "text-negative"}`}>
                       {parseFloat(perfYTD) >= 0 ? "+" : ""}{perfYTD}%
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <TakeBadge theses={tickerTheses} onOpen={openDrawer} />
                     </TableCell>
                   </TableRow>
                 );
