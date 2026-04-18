@@ -1,4 +1,4 @@
-import { BarChart3, LogOut } from "lucide-react";
+import { BarChart3, LogOut, BookOpen } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Sidebar,
@@ -15,12 +15,17 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 
-export function AppSidebar() {
+interface AppSidebarProps {
+  activeThesisCount?: number;
+}
+
+export function AppSidebar({ activeThesisCount = 0 }: AppSidebarProps) {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
   const navigate = useNavigate();
-  const isActive = location.pathname.startsWith("/portfolios");
+  const isPortfolios = location.pathname.startsWith("/portfolios");
+  const isTheTake = location.pathname.startsWith("/the-take");
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -39,10 +44,25 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive={isActive}>
+                <SidebarMenuButton asChild isActive={isPortfolios}>
                   <Link to="/portfolios">
                     <BarChart3 className="h-4 w-4" />
                     {!collapsed && <span>Portfolios</span>}
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={isTheTake}>
+                  <Link to="/the-take" className="flex items-center justify-between w-full">
+                    <span className="flex items-center gap-2">
+                      <BookOpen className="h-4 w-4" />
+                      {!collapsed && <span>The Take</span>}
+                    </span>
+                    {!collapsed && activeThesisCount > 0 && (
+                      <span className="ml-auto inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-full bg-primary/20 text-primary text-[10px] font-medium">
+                        {activeThesisCount}
+                      </span>
+                    )}
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
