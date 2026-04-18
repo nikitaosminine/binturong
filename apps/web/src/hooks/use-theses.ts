@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Thesis, ThesisBodyBlock, ThesisEvidence, ThesisConviction, ThesisStatus } from "@/lib/thesis";
+import { Thesis, ThesisBodyBlock, ThesisEvidence, ThesisAttachment, ThesisConviction, ThesisStatus } from "@/lib/thesis";
 import { supabase } from "@/integrations/supabase/client";
 import { Json } from "@/integrations/supabase/types";
 import { toast } from "sonner";
@@ -13,6 +13,7 @@ function dbRowToThesis(row: {
   tickers: string[];
   body: Json;
   evidence: Json;
+  attachments: Json;
   horizon: string;
   tags: string[];
   created_at: string;
@@ -26,6 +27,7 @@ function dbRowToThesis(row: {
     tickers: row.tickers,
     body: (row.body as unknown as ThesisBodyBlock[]) ?? [],
     evidence: (row.evidence as unknown as ThesisEvidence[]) ?? [],
+    attachments: (row.attachments as unknown as ThesisAttachment[]) ?? [],
     horizon: row.horizon,
     tags: row.tags,
     createdAt: row.created_at.split("T")[0],
@@ -41,6 +43,7 @@ function thesisToRow(fields: Partial<Omit<Thesis, "id" | "createdAt">>) {
   if (fields.tickers !== undefined) row.tickers = fields.tickers;
   if (fields.body !== undefined) row.body = fields.body as unknown as Json;
   if (fields.evidence !== undefined) row.evidence = fields.evidence as unknown as Json;
+  if (fields.attachments !== undefined) row.attachments = fields.attachments as unknown as Json;
   if (fields.horizon !== undefined) row.horizon = fields.horizon;
   if (fields.tags !== undefined) row.tags = fields.tags;
   return row;
@@ -74,6 +77,7 @@ export function useTheses() {
       tickers: fields.tickers,
       body: fields.body as unknown as Json,
       evidence: fields.evidence as unknown as Json,
+      attachments: (fields.attachments ?? []) as unknown as Json,
       horizon: fields.horizon,
       tags: fields.tags,
     });

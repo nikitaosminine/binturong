@@ -157,6 +157,7 @@ export type Database = {
           tickers: string[]
           body: Json
           evidence: Json
+          attachments: Json
           horizon: string
           tags: string[]
           created_at: string
@@ -173,6 +174,7 @@ export type Database = {
           tickers?: string[]
           body?: Json
           evidence?: Json
+          attachments?: Json
           horizon?: string
           tags?: string[]
           created_at?: string
@@ -189,6 +191,7 @@ export type Database = {
           tickers?: string[]
           body?: Json
           evidence?: Json
+          attachments?: Json
           horizon?: string
           tags?: string[]
           created_at?: string
