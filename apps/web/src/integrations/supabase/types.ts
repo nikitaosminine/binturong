@@ -118,6 +118,33 @@ export type Database = {
         }
         Relationships: []
       }
+      watchlist_items: {
+        Row: {
+          id: string
+          user_id: string
+          ticker: string
+          isin: string | null
+          name: string
+          added_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          ticker: string
+          isin?: string | null
+          name: string
+          added_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          ticker?: string
+          isin?: string | null
+          name?: string
+          added_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

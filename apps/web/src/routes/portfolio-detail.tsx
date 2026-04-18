@@ -214,8 +214,8 @@ export default function PortfolioDetailPage() {
 
     r.sort((a, b) => {
       const dir = sortDir === "asc" ? 1 : -1;
-      const av = (a as Record<string, unknown>)[sortBy];
-      const bv = (b as Record<string, unknown>)[sortBy];
+      const av = (a as unknown as Record<string, unknown>)[sortBy];
+      const bv = (b as unknown as Record<string, unknown>)[sortBy];
       if (typeof av === "string" && typeof bv === "string") return av.localeCompare(bv) * dir;
       return (((av as number) ?? 0) - ((bv as number) ?? 0)) * dir;
     });
