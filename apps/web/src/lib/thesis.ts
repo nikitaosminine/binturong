@@ -13,6 +13,13 @@ export interface ThesisEvidence {
   date: string;
 }
 
+export interface ThesisAttachment {
+  path: string;
+  name: string;
+  type: string;
+  size: number;
+}
+
 export interface Thesis {
   id: string;
   title: string;
@@ -24,6 +31,7 @@ export interface Thesis {
   evidence: ThesisEvidence[];
   horizon: string;
   tags: string[];
+  attachments: ThesisAttachment[];
   createdAt: string;
 }
 
@@ -65,6 +73,7 @@ export const DEMO_THESES: Thesis[] = [
       { id: "e1b", type: "confirm", text: "NVDA Q4 FY2025: Data Center revenue $35.6B, +93% YoY, beat by $2.1B", date: "2025-02-26" },
       { id: "e1c", type: "warn", text: "Google TPU v6 benchmarks show 2x perf/$ vs H100 for transformer workloads", date: "2025-03-12" },
     ],
+    attachments: [],
     createdAt: "2024-11-15",
   },
   {
@@ -84,6 +93,7 @@ export const DEMO_THESES: Thesis[] = [
       { id: "e2a", type: "confirm", text: "Services revenue grew 14% YoY to $26.3B in Q1 FY2025", date: "2025-02-06" },
       { id: "e2b", type: "neutral", text: "EU DMA compliance cost estimated at $1.2B annually — manageable at scale", date: "2025-01-15" },
     ],
+    attachments: [],
     createdAt: "2024-10-03",
   },
   {
@@ -102,6 +112,7 @@ export const DEMO_THESES: Thesis[] = [
       { id: "e3a", type: "confirm", text: "Copilot commercial seats doubled QoQ in Q2 FY2025", date: "2025-01-29" },
       { id: "e3b", type: "warn", text: "Enterprise churn on Copilot seats reportedly elevated — low engagement in early cohorts", date: "2025-03-05" },
     ],
+    attachments: [],
     createdAt: "2024-09-20",
   },
   {
@@ -119,6 +130,7 @@ export const DEMO_THESES: Thesis[] = [
     evidence: [
       { id: "e4a", type: "confirm", text: "Q4 2024 ad revenue: $46.8B, +21% YoY — ad impressions +11%, price +6%", date: "2025-01-29" },
     ],
+    attachments: [],
     createdAt: "2024-08-10",
   },
   {
@@ -138,6 +150,7 @@ export const DEMO_THESES: Thesis[] = [
       { id: "e5b", type: "warn", text: "Broadcom and Qualcomm reportedly declining 18A test chips — going to TSMC", date: "2025-02-20" },
       { id: "e5c", type: "neutral", text: "CEO Lip-Bu Tan accelerates restructuring: 15,000 additional layoffs planned", date: "2025-03-18" },
     ],
+    attachments: [],
     createdAt: "2024-07-01",
   },
   {
@@ -155,6 +168,7 @@ export const DEMO_THESES: Thesis[] = [
     evidence: [
       { id: "e6a", type: "neutral", text: "Q4 2024: +19M subscribers (record quarter), but management signals normalization ahead", date: "2025-01-21" },
     ],
+    attachments: [],
     createdAt: "2024-06-15",
   },
 ];

@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from "react";
-import { X, Pencil, Trash2, Check } from "lucide-react";
+import { X, Pencil, Trash2, Check, Paperclip, FileText, FileImage } from "lucide-react";
 import { DialogClose } from "@/components/ui/dialog";
 import {
   Thesis,
+  ThesisAttachment,
   ThesisConviction,
   ThesisStatus,
   STOCKS,
@@ -12,6 +13,7 @@ import { ThesisBody } from "./thesis-body";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { supabase } from "@/integrations/supabase/client";
 
 interface Props {
   open: boolean;
@@ -76,6 +78,12 @@ function ConvictionDots({ level }: { level: ThesisConviction }) {
   );
 }
 
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
 export function ThesisCenteredModal({ open, onOpenChange, thesis, onSave, onDelete }: Props) {
   const isCreate = thesis === null;
   const [mode, setMode] = useState<"view" | "edit">(isCreate ? "edit" : "view");
@@ -93,6 +101,14 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, onSave, onDele
   const [tags, setTags] = useState("");
   const tickerRef = useRef<HTMLDivElement>(null);
 
+  // Attachment state
+  const [existingAttachments, setExistingAttachments] = useState<ThesisAttachment[]>([]);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [removedPaths, setRemovedPaths] = useState<string[]>([]);
+  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Reset form + mode when modal opens or thesis changes
   useEffect(() => {
     if (!open) return;
@@ -107,12 +123,34 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, onSave, onDele
       setTickers(src.tickers);
       setHorizon(src.horizon);
       setTags(src.tags.join(", "));
+      setExistingAttachments(src.attachments ?? []);
     } else {
       setTitle(""); setSummary(""); setReasoning(""); setConviction("med");
       setStatus("active"); setTickers([]); setHorizon(""); setTags("");
+      setExistingAttachments([]);
     }
+    setPendingFiles([]);
+    setRemovedPaths([]);
     setTickerSearch("");
   }, [open, thesis]);
+
+  // Generate signed URLs when viewing attachments
+  useEffect(() => {
+    if (!open || mode !== "view" || !thesis?.attachments?.length) return;
+    const generate = async () => {
+      const urls: Record<string, string> = {};
+      await Promise.all(
+        (thesis.attachments ?? []).map(async (att) => {
+          const { data } = await supabase.storage
+            .from("thesis-attachments")
+            .createSignedUrl(att.path, 3600);
+          if (data) urls[att.path] = data.signedUrl;
+        })
+      );
+      setSignedUrls(urls);
+    };
+    generate();
+  }, [open, mode, thesis]);
 
   // Close ticker dropdown on outside click
   useEffect(() => {
@@ -132,23 +170,65 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, onSave, onDele
       !tickers.includes(s.ticker)
   ).slice(0, 8);
 
-  const handleSave = () => {
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length) setPendingFiles((prev) => [...prev, ...files]);
+    e.target.value = "";
+  };
+
+  const removeExistingAttachment = (att: ThesisAttachment) => {
+    setExistingAttachments((prev) => prev.filter((a) => a.path !== att.path));
+    setRemovedPaths((prev) => [...prev, att.path]);
+  };
+
+  const removePendingFile = (index: number) => {
+    setPendingFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleSave = async () => {
     if (!title.trim()) return;
-    const body = reasoning.trim()
-      ? [{ type: "p" as const, content: reasoning.trim() }]
-      : [];
-    onSave({
-      title: title.trim(),
-      summary: summary.trim(),
-      conviction,
-      status,
-      tickers,
-      body,
-      evidence: thesis?.evidence ?? [],
-      horizon: horizon.trim(),
-      tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
-    });
-    onOpenChange(false);
+    setUploading(true);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+
+      // Upload pending files to storage
+      const newAttachments: ThesisAttachment[] = [];
+      for (const file of pendingFiles) {
+        const path = `${user!.id}/${crypto.randomUUID()}-${file.name}`;
+        const { error } = await supabase.storage
+          .from("thesis-attachments")
+          .upload(path, file);
+        if (!error) {
+          newAttachments.push({ path, name: file.name, type: file.type, size: file.size });
+        }
+      }
+
+      // Delete removed attachments from storage
+      if (removedPaths.length) {
+        await supabase.storage.from("thesis-attachments").remove(removedPaths);
+      }
+
+      const body = reasoning.trim()
+        ? [{ type: "p" as const, content: reasoning.trim() }]
+        : [];
+
+      onSave({
+        title: title.trim(),
+        summary: summary.trim(),
+        conviction,
+        status,
+        tickers,
+        body,
+        evidence: thesis?.evidence ?? [],
+        horizon: horizon.trim(),
+        tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
+        attachments: [...existingAttachments, ...newAttachments],
+      });
+      onOpenChange(false);
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleDelete = () => {
@@ -237,6 +317,43 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, onSave, onDele
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Reasoning</p>
                     <ThesisBody blocks={thesis.body} />
+                  </div>
+                )}
+
+                {/* Attachments — view */}
+                {(thesis.attachments ?? []).length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Attachments</p>
+                    <div className="flex flex-wrap gap-3">
+                      {(thesis.attachments ?? []).map((att) => {
+                        const url = signedUrls[att.path];
+                        const isImage = att.type.startsWith("image/");
+                        return isImage ? (
+                          <a key={att.path} href={url} target="_blank" rel="noopener noreferrer" className="block">
+                            {url ? (
+                              <img
+                                src={url}
+                                alt={att.name}
+                                className="h-28 w-28 object-cover rounded-md border border-border/50 hover:opacity-80 transition-opacity"
+                              />
+                            ) : (
+                              <div className="h-28 w-28 rounded-md border border-border/50 bg-muted animate-pulse" />
+                            )}
+                          </a>
+                        ) : (
+                          <a
+                            key={att.path}
+                            href={url}
+                            download={att.name}
+                            className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-border/50 bg-muted/30 text-xs hover:bg-muted/60 transition-colors"
+                          >
+                            <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                            <span className="truncate max-w-[160px]">{att.name}</span>
+                            <span className="text-muted-foreground/60 shrink-0">{formatSize(att.size)}</span>
+                          </a>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
 
@@ -417,14 +534,76 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, onSave, onDele
                   />
                 </div>
               </div>
+
+              {/* Attachments — edit */}
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Attachments</Label>
+                <div className="flex flex-wrap gap-2 p-2 rounded-md border border-input min-h-9 bg-transparent">
+                  {existingAttachments.map((att) => (
+                    <span key={att.path} className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-muted text-xs">
+                      {att.type.startsWith("image/")
+                        ? <FileImage className="h-3 w-3 text-muted-foreground" />
+                        : <FileText className="h-3 w-3 text-muted-foreground" />
+                      }
+                      <span className="max-w-[120px] truncate">{att.name}</span>
+                      <button
+                        onClick={() => removeExistingAttachment(att)}
+                        className="text-muted-foreground hover:text-foreground ml-0.5"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                  {pendingFiles.map((f, i) => (
+                    <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-primary/15 text-primary text-xs">
+                      {f.type.startsWith("image/")
+                        ? <FileImage className="h-3 w-3" />
+                        : <FileText className="h-3 w-3" />
+                      }
+                      <span className="max-w-[120px] truncate">{f.name}</span>
+                      <span className="text-primary/60">{formatSize(f.size)}</span>
+                      <button
+                        onClick={() => removePendingFile(i)}
+                        className="hover:text-primary/70 ml-0.5"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                  >
+                    <Paperclip className="h-3 w-3" />
+                    Attach file
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
+                    onChange={handleFileSelect}
+                    className="sr-only"
+                  />
+                </div>
+              </div>
             </div>
 
             {/* Footer */}
             <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border/50 shrink-0">
-              <Button variant="ghost" size="sm" onClick={handleCancel}>Cancel</Button>
-              <Button size="sm" onClick={handleSave} disabled={!title.trim()}>
-                <Check className="h-3.5 w-3.5 mr-1.5" />
-                {isCreate ? "Add take" : "Save changes"}
+              <Button variant="ghost" size="sm" onClick={handleCancel} disabled={uploading}>Cancel</Button>
+              <Button size="sm" onClick={handleSave} disabled={!title.trim() || uploading}>
+                {uploading ? (
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-3.5 w-3.5 rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground animate-spin" />
+                    Uploading…
+                  </span>
+                ) : (
+                  <>
+                    <Check className="h-3.5 w-3.5 mr-1.5" />
+                    {isCreate ? "Add take" : "Save changes"}
+                  </>
+                )}
               </Button>
             </div>
           </>
