@@ -150,6 +150,7 @@ export type Database = {
           id: string
           user_id: string
           title: string
+          content: string
           summary: string
           conviction: string
           status: string
@@ -165,6 +166,7 @@ export type Database = {
           id?: string
           user_id: string
           title: string
+          content?: string
           summary?: string
           conviction?: string
           status?: string
@@ -180,6 +182,7 @@ export type Database = {
           id?: string
           user_id?: string
           title?: string
+          content?: string
           summary?: string
           conviction?: string
           status?: string
