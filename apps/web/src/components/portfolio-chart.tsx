@@ -49,6 +49,7 @@ export function PortfolioChart({ data }: PortfolioChartProps) {
     if (!container) return;
 
     let remove = false;
+    let frameId = 0;
     let chart: {
       remove: () => void;
       applyOptions: (options: { width: number }) => void;
@@ -60,15 +61,18 @@ export function PortfolioChart({ data }: PortfolioChartProps) {
     const setup = async () => {
       const importFromUrl = new Function("u", "return import(u)") as (
         u: string,
-      ) => Promise<{ createChart: (el: HTMLElement, opts: Record<string, unknown>) => typeof chart }>;
+      ) => Promise<{
+        createChart: (el: HTMLElement, opts: Record<string, unknown>) => typeof chart;
+      }>;
       const lightweightCharts = await importFromUrl(
         "https://esm.sh/gh/nikitaosminine/lightweight-charts",
       );
       if (remove || !container) return;
+      if (container.clientWidth === 0 || container.clientHeight === 0) return;
 
       chart = lightweightCharts.createChart(container, {
         width: container.clientWidth,
-        height: 256,
+        height: 300,
         layout: {
           background: { color: "transparent" },
           textColor: "oklch(0.72 0.02 264)",
@@ -95,12 +99,12 @@ export function PortfolioChart({ data }: PortfolioChartProps) {
         lineWidth: 2,
       });
 
-      areaSeries.setData(
-        filteredData.map((point) => ({
-          time: point.time,
-          value: point.value,
-        })),
-      );
+      const seriesData = filteredData.map((point) => ({
+        time: point.time,
+        value: point.value,
+      }));
+      console.log("[PortfolioChart] seriesData", seriesData);
+      areaSeries.setData(seriesData);
       chart.timeScale().fitContent();
 
       resizeObserver = new ResizeObserver(() => {
@@ -110,13 +114,20 @@ export function PortfolioChart({ data }: PortfolioChartProps) {
       resizeObserver.observe(container);
     };
 
-    setup();
+    frameId = window.requestAnimationFrame(() => {
+      setup();
+    });
 
     return () => {
       remove = true;
+      window.cancelAnimationFrame(frameId);
       if (resizeObserver) resizeObserver.disconnect();
       if (chart) chart.remove();
     };
+  }, [filteredData]);
+
+  useEffect(() => {
+    console.log("[PortfolioChart] filteredData length", filteredData.length, filteredData);
   }, [filteredData]);
 
   return (
@@ -138,7 +149,7 @@ export function PortfolioChart({ data }: PortfolioChartProps) {
           ))}
         </div>
       </div>
-      <div ref={containerRef} className="h-64 w-full" />
+      <div ref={containerRef} className="w-full" style={{ height: 300 }} />
     </div>
   );
 }
