@@ -4,7 +4,7 @@ compatibility_date = "2026-04-17"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
-SUPABASE_URL = "https://your-project.supabase.co"
+SUPABASE_URL = "https://sfqowvpuzsqgmwlecgdx.supabase.co"
 
 # Secrets (set via CLI, not in this file):
 # wrangler secret put SUPABASE_SERVICE_KEY
