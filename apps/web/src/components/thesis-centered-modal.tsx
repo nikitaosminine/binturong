@@ -19,6 +19,7 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   thesis: Thesis | null;
+  createPrefill?: Partial<Pick<Thesis, "title" | "summary" | "tickers" | "horizon" | "tags">> | null;
   onSave: (data: Omit<Thesis, "id" | "createdAt">) => void;
   onDelete?: (id: string) => void;
 }
@@ -112,7 +113,7 @@ function parseCsv(text: string): string[][] {
   return rows;
 }
 
-export function ThesisCenteredModal({ open, onOpenChange, thesis, onSave, onDelete }: Props) {
+export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill, onSave, onDelete }: Props) {
   const isCreate = thesis === null;
   const [mode, setMode] = useState<"view" | "edit">(isCreate ? "edit" : "view");
 
@@ -161,8 +162,14 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, onSave, onDele
       setTags(src.tags.join(", "));
       setExistingAttachments(src.attachments ?? []);
     } else {
-      setTitle(""); setSummary(""); setReasoning(""); setConviction("med");
-      setStatus("active"); setTickers([]); setHorizon(""); setTags("");
+      setTitle(createPrefill?.title ?? "");
+      setSummary(createPrefill?.summary ?? "");
+      setReasoning("");
+      setConviction("med");
+      setStatus("active");
+      setTickers(createPrefill?.tickers ?? []);
+      setHorizon(createPrefill?.horizon ?? "");
+      setTags((createPrefill?.tags ?? []).join(", "));
       setExistingAttachments([]);
     }
     setPendingFiles([]);
@@ -170,7 +177,7 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, onSave, onDele
     setTickerSearch("");
     setLightboxSrc(null);
     setSheetPreview(null);
-  }, [open, thesis]);
+  }, [open, thesis, createPrefill]);
 
   // Generate signed URLs when viewing attachments
   useEffect(() => {

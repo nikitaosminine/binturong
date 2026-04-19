@@ -33,7 +33,7 @@ interface Holding {
 interface ThesisContext {
   theses: Thesis[];
   openDrawer: (id: string) => void;
-  openModal: (thesis?: Thesis) => void;
+  openModal: (thesis?: Thesis, prefill?: Partial<Pick<Thesis, "title" | "summary" | "tickers" | "horizon" | "tags">>) => void;
   updateThesis: (id: string, patch: Partial<Thesis>) => void;
 }
 
@@ -200,7 +200,7 @@ function saveLS(key: string, val: unknown) {
 
 export default function PortfolioDetailPage() {
   const { portfolioId } = useParams<{ portfolioId: string }>();
-  const { theses, openDrawer, updateThesis } = useOutletContext<ThesisContext>();
+  const { theses, openDrawer, openModal, updateThesis } = useOutletContext<ThesisContext>();
   const [portfolio, setPortfolio] = useState<{ name: string; description: string | null } | null>(null);
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [period, setPeriod] = useState<string>("1M");
@@ -428,7 +428,7 @@ export default function PortfolioDetailPage() {
 
       {/* Holdings table — full width */}
       <div>
-        <div className="rounded-lg border border-border/50 overflow-hidden">
+        <div className="rounded-lg border border-border/50 overflow-visible">
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
               <div className="text-[11px] uppercase tracking-widest text-muted-foreground">Holdings</div>
               <div className="text-[11px] text-muted-foreground font-mono">{rows.length} positions</div>
@@ -535,7 +535,11 @@ export default function PortfolioDetailPage() {
                                 )}
                                 {key === "take" && (
                                   <div className="flex justify-center">
-                                    <TakeBadge theses={tickerTheses} onOpen={openDrawer} />
+                                    <TakeBadge
+                                      theses={tickerTheses}
+                                      onOpen={openDrawer}
+                                      onCreate={() => openModal(undefined, { tickers: [r.ticker] })}
+                                    />
                                   </div>
                                 )}
                               </td>
