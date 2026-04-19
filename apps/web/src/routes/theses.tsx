@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 interface ThesisContext {
   theses: Thesis[];
   openDrawer: (id: string) => void;
-  openModal: (thesis?: Thesis) => void;
+  openModal: (thesis?: Thesis, prefill?: Partial<Pick<Thesis, "title" | "summary" | "tickers" | "horizon" | "tags">>) => void;
 }
 
 const STATUS_LABELS: Record<ThesisStatus, string> = {
