@@ -579,8 +579,8 @@ export default function PortfolioDetailPage() {
         </div>
 
         {/* Chart + Sector allocation */}
-        <div className="grid grid-cols-4 gap-3">
-          <div className="col-span-3 rounded-lg border border-border/50 bg-card p-4">
+        <div className="grid grid-cols-10 gap-3">
+          <div className="col-span-7 rounded-lg border border-border/50 bg-card p-4">
             <div className="flex items-center justify-between mb-3">
               <div>
                 <div className="text-[11px] uppercase tracking-widest text-muted-foreground">
@@ -600,7 +600,7 @@ export default function PortfolioDetailPage() {
             </div>
             <PortfolioChart />
           </div>
-          <div className="col-span-1">
+          <div className="col-span-3">
             <SectorAllocationCard rows={rows} cashValue={cashValue} />
           </div>
         </div>
