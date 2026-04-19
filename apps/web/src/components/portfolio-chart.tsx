@@ -75,6 +75,7 @@ export function PortfolioChart({ data }: PortfolioChartProps) {
           layout: {
             background: { color: "transparent" },
             textColor: "#A1A1AA",
+            attributionLogo: false,
           },
           grid: {
             vertLines: { color: "rgba(255, 255, 255, 0.04)" },
