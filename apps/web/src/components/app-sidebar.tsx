@@ -1,14 +1,5 @@
 import { useEffect, useState } from "react";
-import {
-  BarChart3,
-  Bell,
-  BookOpen,
-  LogOut,
-  PanelsTopLeft,
-  Settings,
-} from "lucide-react";
-import { BarChart3, LogOut, BookOpen, Bell, Settings, PanelsTopLeft } from "lucide-react";
-import { BarChart3, LogOut, BookOpen, Bell, Settings, Bookmark, PanelsTopLeft } from "lucide-react";
+import { BarChart3, Bell, BookOpen, LogOut, PanelsTopLeft, Settings } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Sidebar,
@@ -80,7 +71,6 @@ export function AppSidebar({ activeThesisCount = 0 }: AppSidebarProps) {
     // setOpen changes identity when open state changes; we only want to react to mode changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sidebarMode]);
-  }, [setOpen, sidebarMode]);
 
   return (
     <Sidebar
