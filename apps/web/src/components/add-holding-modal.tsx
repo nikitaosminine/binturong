@@ -30,7 +30,7 @@ interface AssetSearchResult {
   assetType: string;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? "https://binturong-api.nikita-osminine.workers.dev" : "http://localhost:8787");
 
 export function AddHoldingModal({ open, onOpenChange, portfolioId, onAdded }: Props) {
   const [ticker, setTicker] = useState("");

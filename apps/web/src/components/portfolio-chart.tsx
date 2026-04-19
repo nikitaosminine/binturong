@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createChart } from "lightweight-charts";
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 export interface PortfolioChartPoint {
@@ -60,26 +61,11 @@ export function PortfolioChart({ data }: PortfolioChartProps) {
     } | null = null;
     let resizeObserver: ResizeObserver | null = null;
 
-    const setup = async () => {
-      let lightweightCharts:
-        | { createChart: (el: HTMLElement, opts: Record<string, unknown>) => typeof chart }
-        | undefined;
-      try {
-        const importFromUrl = new Function("u", "return import(u)") as (u: string) => Promise<{
-          createChart: (el: HTMLElement, opts: Record<string, unknown>) => typeof chart;
-        }>;
-        lightweightCharts = await importFromUrl(
-          "https://esm.sh/gh/nikitaosminine/lightweight-charts",
-        );
-      } catch (error) {
-        console.error("[PortfolioChart] Failed to load lightweight-charts, using fallback.", error);
-        setChartUnavailable(true);
-        return;
-      }
+    const setup = () => {
       if (remove || !container) return;
       if (container.clientWidth === 0 || container.clientHeight === 0) return;
 
-      chart = lightweightCharts.createChart(container, {
+      chart = createChart(container, {
         width: container.clientWidth,
         height: 300,
         layout: {

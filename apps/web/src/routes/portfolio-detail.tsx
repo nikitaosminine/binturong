@@ -261,7 +261,7 @@ interface LiveQuote {
   ytdChangePercent: number | null;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? "https://binturong-api.nikita-osminine.workers.dev" : "http://localhost:8787");
 
 const DEFAULT_ORDER: ColKey[] = ALL_COLUMNS.map((c) => c.key);
 
