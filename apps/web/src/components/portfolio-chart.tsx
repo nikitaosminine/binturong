@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createChart } from "lightweight-charts";
+import { AreaSeries, createChart } from "lightweight-charts";
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 export interface PortfolioChartPoint {
@@ -56,7 +56,10 @@ export function PortfolioChart({ data }: PortfolioChartProps) {
     let chart: {
       remove: () => void;
       applyOptions: (options: { width: number }) => void;
-      addAreaSeries: (opts: Record<string, unknown>) => { setData: (data: unknown[]) => void };
+      addSeries: (
+        definition: unknown,
+        opts: Record<string, unknown>,
+      ) => { setData: (data: unknown[]) => void };
       timeScale: () => { fitContent: () => void };
     } | null = null;
     let resizeObserver: ResizeObserver | null = null;
@@ -88,7 +91,7 @@ export function PortfolioChart({ data }: PortfolioChartProps) {
         });
 
         if (!chart) return;
-        const areaSeries = chart.addAreaSeries({
+        const areaSeries = chart.addSeries(AreaSeries, {
           lineColor: "#22ab94",
           topColor: "rgba(34, 171, 148, 0.24)",
           bottomColor: "rgba(34, 171, 148, 0.03)",
