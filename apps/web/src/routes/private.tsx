@@ -76,14 +76,21 @@ export default function PrivateRoute() {
   const { theses, addThesis, updateThesis, deleteThesis } = useTheses();
   const [selectedThesisId, setSelectedThesisId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [createPrefill, setCreatePrefill] = useState<
+    Partial<Pick<Thesis, "title" | "summary" | "tickers" | "horizon" | "tags">> | null
+  >(null);
 
   if (isLoading) return null;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
 
   const openDrawer = (id: string) => setSelectedThesisId(id);
-  const openModal = (thesis?: Thesis) => {
-    if (thesis) setSelectedThesisId(thesis.id);
-    else setCreateOpen(true);
+  const openModal = (thesis?: Thesis, prefill?: Partial<Pick<Thesis, "title" | "summary" | "tickers" | "horizon" | "tags">>) => {
+    if (thesis) {
+      setSelectedThesisId(thesis.id);
+      return;
+    }
+    setCreatePrefill(prefill ?? null);
+    setCreateOpen(true);
   };
 
   const selectedThesis = selectedThesisId ? theses.find((t) => t.id === selectedThesisId) ?? null : null;
@@ -104,16 +111,18 @@ export default function PrivateRoute() {
       <ThesisCenteredModal
         open={!!selectedThesisId || createOpen}
         onOpenChange={(o) => {
-          if (!o) { setSelectedThesisId(null); setCreateOpen(false); }
+          if (!o) { setSelectedThesisId(null); setCreateOpen(false); setCreatePrefill(null); }
         }}
         thesis={selectedThesis}
+        createPrefill={createPrefill}
         onSave={(data) => {
           if (selectedThesisId) updateThesis(selectedThesisId, data);
           else addThesis(data);
           setSelectedThesisId(null);
           setCreateOpen(false);
+          setCreatePrefill(null);
         }}
-        onDelete={(id) => { deleteThesis(id); setSelectedThesisId(null); }}
+        onDelete={(id) => { deleteThesis(id); setSelectedThesisId(null); setCreatePrefill(null); }}
       />
     </SidebarProvider>
   );
