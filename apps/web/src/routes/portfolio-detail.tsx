@@ -12,7 +12,7 @@ import { Thesis, thesesForTicker, thesesForPortfolio } from "@/lib/thesis";
 import { EditHoldingModal } from "@/components/edit-holding-modal";
 import { AddHoldingModal } from "@/components/add-holding-modal";
 import { ThesisStack } from "@/components/thesis-stack/ThesisStack";
-import { TradingViewSymbolOverview } from "@/components/tradingview-symbol-overview";
+import { PortfolioChart } from "@/components/portfolio-chart";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -289,7 +289,6 @@ export default function PortfolioDetailPage() {
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [loading, setLoading] = useState(true);
   const [liveQuotes, setLiveQuotes] = useState<Record<string, LiveQuote>>({});
-  const [selectedSymbol, setSelectedSymbol] = useState<string | undefined>(undefined);
 
   // Sort
   const [sortBy, setSortBy] = useState<string>("total");
@@ -431,11 +430,6 @@ export default function PortfolioDetailPage() {
     () => Array.from(new Set(holdings.map((h) => h.ticker.toUpperCase()))),
     [holdings],
   );
-  useEffect(() => {
-    setSelectedSymbol((prev) =>
-      prev && portfolioTickers.includes(prev) ? prev : portfolioTickers[0],
-    );
-  }, [portfolioTickers]);
 
   const visibleCols = colOrder.filter((k) => !hiddenCols.has(k));
 
@@ -569,7 +563,7 @@ export default function PortfolioDetailPage() {
                 </div>
               </div>
             </div>
-            <TradingViewSymbolOverview symbols={portfolioTickers} selectedSymbol={selectedSymbol} />
+            <PortfolioChart />
           </div>
           <div className="col-span-1">
             <SectorAllocationCard rows={rows} />
