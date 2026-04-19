@@ -1,4 +1,12 @@
 import { useEffect, useState } from "react";
+import {
+  BarChart3,
+  Bell,
+  BookOpen,
+  LogOut,
+  PanelsTopLeft,
+  Settings,
+} from "lucide-react";
 import { BarChart3, LogOut, BookOpen, Bell, Settings, PanelsTopLeft } from "lucide-react";
 import { BarChart3, LogOut, BookOpen, Bell, Settings, Bookmark, PanelsTopLeft } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
