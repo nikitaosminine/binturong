@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Link, useParams, useOutletContext } from "react-router-dom";
-import { ArrowLeft, Plus, Pencil, Trash2, Landmark } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { getSector } from "@/lib/mock-data";
@@ -555,7 +555,7 @@ export default function PortfolioDetailPage() {
                 setCashDialogOpen(true);
               }}
             >
-              <Landmark className="h-3.5 w-3.5 mr-1.5" />
+              <Plus className="h-3.5 w-3.5 mr-1.5" />
               Add cash
             </Button>
           </div>
