@@ -8,7 +8,8 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.103.3"
+    "@supabase/supabase-js": "^2.103.3",
+    "yahoo-finance2": "^3.12.1"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.0.0",

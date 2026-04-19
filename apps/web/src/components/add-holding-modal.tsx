@@ -1,10 +1,15 @@
-import { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { useEffect, useState } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
-import { MOCK_STOCKS } from "@/lib/mock-data";
 import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
@@ -18,21 +23,38 @@ interface Props {
   onAdded: () => void;
 }
 
+interface AssetSearchResult {
+  ticker: string;
+  name: string;
+  exchange: string;
+  assetType: string;
+}
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+
 export function AddHoldingModal({ open, onOpenChange, portfolioId, onAdded }: Props) {
-  const [ticker, setTicker]   = useState("");
-  const [name, setName]       = useState("");
-  const [isin, setIsin]       = useState("");
-  const [date, setDate]       = useState<Date | undefined>(undefined);
-  const [price, setPrice]     = useState("");
-  const [quantity, setQty]    = useState("");
-  const [fees, setFees]       = useState("");
+  const [ticker, setTicker] = useState("");
+  const [name, setName] = useState("");
+  const [isin, setIsin] = useState("");
+  const [date, setDate] = useState<Date | undefined>(undefined);
+  const [price, setPrice] = useState("");
+  const [quantity, setQty] = useState("");
+  const [fees, setFees] = useState("");
   const [loading, setLoading] = useState(false);
-  const [searchResults, setSearchResults] = useState<typeof MOCK_STOCKS>([]);
+  const [searchResults, setSearchResults] = useState<AssetSearchResult[]>([]);
   const [showSearch, setShowSearch] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
 
   const reset = () => {
-    setTicker(""); setName(""); setIsin(""); setDate(undefined);
-    setPrice(""); setQty(""); setFees(""); setSearchResults([]); setShowSearch(false);
+    setTicker("");
+    setName("");
+    setIsin("");
+    setDate(undefined);
+    setPrice("");
+    setQty("");
+    setFees("");
+    setSearchResults([]);
+    setShowSearch(false);
   };
 
   const handleOpenChange = (v: boolean) => {
@@ -43,23 +65,48 @@ export function AddHoldingModal({ open, onOpenChange, portfolioId, onAdded }: Pr
   const searchStocks = (q: string) => {
     setTicker(q);
     setName("");
-    if (q.length > 0) {
-      setSearchResults(
-        MOCK_STOCKS.filter(
-          (s) => s.ticker.toLowerCase().includes(q.toLowerCase()) || s.name.toLowerCase().includes(q.toLowerCase())
-        ).slice(0, 5)
-      );
-      setShowSearch(true);
-    } else {
+    if (q.length === 0) {
       setSearchResults([]);
       setShowSearch(false);
     }
   };
 
-  const selectStock = (s: typeof MOCK_STOCKS[0]) => {
+  useEffect(() => {
+    if (!ticker.trim()) return;
+
+    const controller = new AbortController();
+    const id = window.setTimeout(async () => {
+      try {
+        setSearchLoading(true);
+        const res = await fetch(
+          `${API_BASE_URL}/api/market/search?q=${encodeURIComponent(ticker.trim())}`,
+          {
+            signal: controller.signal,
+          },
+        );
+        if (!res.ok) throw new Error("Search failed");
+        const data = (await res.json()) as AssetSearchResult[];
+        setSearchResults(data);
+        setShowSearch(true);
+      } catch (err) {
+        if ((err as Error).name !== "AbortError") {
+          setSearchResults([]);
+        }
+      } finally {
+        setSearchLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(id);
+    };
+  }, [ticker]);
+
+  const selectStock = (s: AssetSearchResult) => {
     setTicker(s.ticker);
     setName(s.name);
-    setIsin(s.isin);
+    setIsin("");
     setSearchResults([]);
     setShowSearch(false);
   };
@@ -108,10 +155,13 @@ export function AddHoldingModal({ open, onOpenChange, portfolioId, onAdded }: Pr
               placeholder="Search by ticker or name…"
               value={ticker}
               onChange={(e) => searchStocks(e.target.value)}
-              onFocus={() => { if (ticker) searchStocks(ticker); }}
+              onFocus={() => {
+                if (ticker) setShowSearch(true);
+              }}
               onBlur={() => setTimeout(() => setShowSearch(false), 200)}
             />
             {name && <p className="text-xs text-muted-foreground mt-0.5">{name}</p>}
+            {searchLoading && <p className="text-xs text-muted-foreground mt-0.5">Searching…</p>}
             {showSearch && searchResults.length > 0 && (
               <div className="absolute z-50 mt-1 w-full rounded-md border border-border/50 bg-popover shadow-lg">
                 {searchResults.map((s) => (
@@ -120,8 +170,14 @@ export function AddHoldingModal({ open, onOpenChange, portfolioId, onAdded }: Pr
                     className="flex w-full items-center justify-between px-3 py-2 text-sm hover:bg-accent"
                     onMouseDown={() => selectStock(s)}
                   >
-                    <span className="font-medium font-mono">{s.ticker}</span>
-                    <span className="text-xs text-muted-foreground">{s.name}</span>
+                    <div className="text-left">
+                      <div className="font-medium font-mono">{s.ticker}</div>
+                      <div className="text-xs text-muted-foreground">{s.name}</div>
+                    </div>
+                    <div className="text-right text-xs text-muted-foreground">
+                      <div>{s.exchange}</div>
+                      <div>{s.assetType}</div>
+                    </div>
                   </button>
                 ))}
               </div>
@@ -136,7 +192,10 @@ export function AddHoldingModal({ open, onOpenChange, portfolioId, onAdded }: Pr
                 <PopoverTrigger asChild>
                   <Button
                     variant="outline"
-                    className={cn("w-full justify-start text-left text-sm font-normal", !date && "text-muted-foreground")}
+                    className={cn(
+                      "w-full justify-start text-left text-sm font-normal",
+                      !date && "text-muted-foreground",
+                    )}
                   >
                     {date ? format(date, "MMM dd, yyyy") : "Pick a date"}
                   </Button>
@@ -156,24 +215,44 @@ export function AddHoldingModal({ open, onOpenChange, portfolioId, onAdded }: Pr
             {/* Price */}
             <div>
               <Label className="text-xs">Purchase price *</Label>
-              <Input type="number" step="0.01" placeholder="0.00" value={price} onChange={(e) => setPrice(e.target.value)} />
+              <Input
+                type="number"
+                step="0.01"
+                placeholder="0.00"
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+              />
             </div>
 
             {/* Quantity */}
             <div>
               <Label className="text-xs">Quantity *</Label>
-              <Input type="number" step="0.01" placeholder="0" value={quantity} onChange={(e) => setQty(e.target.value)} />
+              <Input
+                type="number"
+                step="0.01"
+                placeholder="0"
+                value={quantity}
+                onChange={(e) => setQty(e.target.value)}
+              />
             </div>
 
             {/* Fees */}
             <div>
               <Label className="text-xs">Fees</Label>
-              <Input type="number" step="0.01" placeholder="0.00" value={fees} onChange={(e) => setFees(e.target.value)} />
+              <Input
+                type="number"
+                step="0.01"
+                placeholder="0.00"
+                value={fees}
+                onChange={(e) => setFees(e.target.value)}
+              />
             </div>
           </div>
 
           <div className="flex gap-2 pt-1">
-            <Button variant="outline" className="flex-1" onClick={() => handleOpenChange(false)}>Cancel</Button>
+            <Button variant="outline" className="flex-1" onClick={() => handleOpenChange(false)}>
+              Cancel
+            </Button>
             <Button className="flex-1" onClick={handleSubmit} disabled={loading}>
               {loading ? "Adding…" : "Add holding"}
             </Button>
