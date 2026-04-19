@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 export interface PortfolioChartPoint {
   time: string;
@@ -39,6 +40,7 @@ function filterDataByRange(points: PortfolioChartPoint[], range: Range): Portfol
 
 export function PortfolioChart({ data }: PortfolioChartProps) {
   const [range, setRange] = useState<Range>("1M");
+  const [chartUnavailable, setChartUnavailable] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const points = data?.length ? data : DEFAULT_DATA;
 
@@ -59,14 +61,21 @@ export function PortfolioChart({ data }: PortfolioChartProps) {
     let resizeObserver: ResizeObserver | null = null;
 
     const setup = async () => {
-      const importFromUrl = new Function("u", "return import(u)") as (
-        u: string,
-      ) => Promise<{
-        createChart: (el: HTMLElement, opts: Record<string, unknown>) => typeof chart;
-      }>;
-      const lightweightCharts = await importFromUrl(
-        "https://esm.sh/gh/nikitaosminine/lightweight-charts",
-      );
+      let lightweightCharts:
+        | { createChart: (el: HTMLElement, opts: Record<string, unknown>) => typeof chart }
+        | undefined;
+      try {
+        const importFromUrl = new Function("u", "return import(u)") as (u: string) => Promise<{
+          createChart: (el: HTMLElement, opts: Record<string, unknown>) => typeof chart;
+        }>;
+        lightweightCharts = await importFromUrl(
+          "https://esm.sh/gh/nikitaosminine/lightweight-charts",
+        );
+      } catch (error) {
+        console.error("[PortfolioChart] Failed to load lightweight-charts, using fallback.", error);
+        setChartUnavailable(true);
+        return;
+      }
       if (remove || !container) return;
       if (container.clientWidth === 0 || container.clientHeight === 0) return;
 
@@ -149,7 +158,34 @@ export function PortfolioChart({ data }: PortfolioChartProps) {
           ))}
         </div>
       </div>
-      <div ref={containerRef} className="w-full" style={{ height: 300 }} />
+      {!chartUnavailable && <div ref={containerRef} className="w-full" style={{ height: 300 }} />}
+      {chartUnavailable && (
+        <div className="h-[300px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={filteredData}>
+              <XAxis dataKey="time" hide />
+              <YAxis hide domain={["dataMin - 200", "dataMax + 200"]} />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: "oklch(0.18 0.03 264)",
+                  border: "1px solid oklch(1 0 0 / 8%)",
+                  borderRadius: "8px",
+                  color: "oklch(0.96 0.005 264)",
+                  fontSize: "12px",
+                }}
+              />
+              <Area
+                type="monotone"
+                dataKey="value"
+                stroke="#22ab94"
+                strokeWidth={2}
+                fill="rgba(34, 171, 148, 0.18)"
+                isAnimationActive={false}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
     </div>
   );
 }
