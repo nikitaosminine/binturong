@@ -1,5 +1,4 @@
 import { createClient } from "@supabase/supabase-js";
-import yahooFinance from "yahoo-finance2";
 
 export interface Env {
   SUPABASE_URL: string;
@@ -33,19 +32,75 @@ function parseSymbols(raw: string | null): string[] {
   );
 }
 
+const YAHOO_HEADERS = {
+  "User-Agent": "Mozilla/5.0",
+  Accept: "application/json",
+};
+
+async function fetchJson<T>(url: string): Promise<T> {
+  const res = await fetch(url, { headers: YAHOO_HEADERS });
+  if (!res.ok) throw new Error(`Yahoo API error (${res.status})`);
+  return (await res.json()) as T;
+}
+
+interface YahooSearchQuote {
+  symbol?: string;
+  shortname?: string;
+  longname?: string;
+  exchange?: string;
+  fullExchangeName?: string;
+  quoteType?: string;
+}
+
+interface YahooSearchResponse {
+  quotes?: YahooSearchQuote[];
+}
+
+interface YahooQuoteItem {
+  symbol?: string;
+  regularMarketPrice?: number | null;
+  postMarketPrice?: number | null;
+  preMarketPrice?: number | null;
+  regularMarketChangePercent?: number | null;
+}
+
+interface YahooQuoteResponse {
+  quoteResponse?: {
+    result?: YahooQuoteItem[];
+  };
+}
+
+interface YahooChartResponse {
+  chart?: {
+    result?: Array<{
+      timestamp?: number[];
+      indicators?: {
+        quote?: Array<{
+          close?: Array<number | null>;
+        }>;
+      };
+    }>;
+  };
+}
+
 async function getYtdChangePercent(symbol: string): Promise<number | null> {
   try {
     const now = new Date();
-    const ytdStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
-    const candles = await yahooFinance.historical(symbol, {
-      period1: ytdStart,
-      period2: now,
-      interval: "1d",
-    });
-    if (!candles.length) return null;
+    const ytdStartUnix = Math.floor(Date.UTC(now.getUTCFullYear(), 0, 1) / 1000);
+    const nowUnix = Math.floor(now.getTime() / 1000);
+    const chartUrl = new URL(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`);
+    chartUrl.searchParams.set("period1", String(ytdStartUnix));
+    chartUrl.searchParams.set("period2", String(nowUnix));
+    chartUrl.searchParams.set("interval", "1d");
+    chartUrl.searchParams.set("events", "history");
 
-    const firstClose = candles.find((c) => c?.close != null)?.close;
-    const lastClose = [...candles].reverse().find((c) => c?.close != null)?.close;
+    const chart = await fetchJson<YahooChartResponse>(chartUrl.toString());
+    const series = chart.chart?.result?.[0];
+    const closes = series?.indicators?.quote?.[0]?.close ?? [];
+
+    if (!closes.length) return null;
+    const firstClose = closes.find((value) => value != null);
+    const lastClose = [...closes].reverse().find((value) => value != null);
     if (!firstClose || !lastClose) return null;
 
     return ((lastClose - firstClose) / firstClose) * 100;
@@ -136,12 +191,14 @@ export default {
       if (!q) return json([]);
 
       try {
-        const result = await yahooFinance.search(q, {
-          quotesCount: 10,
-          enableNavLinks: false,
-          enableCb: false,
-          newsCount: 0,
-        });
+        const searchUrl = new URL("https://query1.finance.yahoo.com/v1/finance/search");
+        searchUrl.searchParams.set("q", q);
+        searchUrl.searchParams.set("quotesCount", "10");
+        searchUrl.searchParams.set("newsCount", "0");
+        searchUrl.searchParams.set("enableFuzzyQuery", "false");
+        searchUrl.searchParams.set("enableEnhancedTrivialQuery", "true");
+
+        const result = await fetchJson<YahooSearchResponse>(searchUrl.toString());
         const quotes = (result.quotes || [])
           .filter((quote) => quote.symbol)
           .map((quote) => ({
@@ -162,19 +219,28 @@ export default {
       if (symbols.length === 0) return json([]);
 
       try {
-        const [quotes, ytdChanges] = await Promise.all([
-          Promise.all(symbols.map((symbol) => yahooFinance.quote(symbol))),
+        const quoteUrl = new URL("https://query1.finance.yahoo.com/v7/finance/quote");
+        quoteUrl.searchParams.set("symbols", symbols.join(","));
+
+        const [quotesResponse, ytdChanges] = await Promise.all([
+          fetchJson<YahooQuoteResponse>(quoteUrl.toString()),
           Promise.all(symbols.map((symbol) => getYtdChangePercent(symbol))),
         ]);
 
+        const quoteMap = new Map<string, YahooQuoteItem>(
+          (quotesResponse.quoteResponse?.result || [])
+            .filter((quote) => quote.symbol)
+            .map((quote) => [quote.symbol!, quote]),
+        );
+
         const data = symbols.map((symbol, i) => {
-          const quote = quotes[i];
+          const quote = quoteMap.get(symbol);
           const current =
-            quote.regularMarketPrice ?? quote.postMarketPrice ?? quote.preMarketPrice ?? null;
+            quote?.regularMarketPrice ?? quote?.postMarketPrice ?? quote?.preMarketPrice ?? null;
           return {
             ticker: symbol,
             currentPrice: current,
-            change1dPercent: quote.regularMarketChangePercent ?? null,
+            change1dPercent: quote?.regularMarketChangePercent ?? null,
             ytdChangePercent: ytdChanges[i],
           };
         });
