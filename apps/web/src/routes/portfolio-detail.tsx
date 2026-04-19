@@ -193,6 +193,7 @@ function SectorAllocationCard({ rows, cashValue }: { rows: RowData[]; cashValue:
 // Column definitions
 const ALL_COLUMNS = [
   { key: "name", label: "Asset", align: "left" },
+  { key: "assetType", label: "Type", align: "left" },
   { key: "qty", label: "Qty", align: "right" },
   { key: "cur", label: "Current", align: "right" },
   { key: "buy", label: "Cost", align: "right" },
@@ -273,9 +274,11 @@ export default function PortfolioDetailPage() {
   );
 
   // Column order
-  const [colOrder, setColOrder] = useState<ColKey[]>(() =>
-    loadLS(`binturong.columns.order.${portfolioId}`, DEFAULT_ORDER),
-  );
+  const [colOrder, setColOrder] = useState<ColKey[]>(() => {
+    const saved = loadLS(`binturong.columns.order.${portfolioId}`, DEFAULT_ORDER);
+    const missing = DEFAULT_ORDER.filter((k) => !saved.includes(k));
+    return [...saved, ...missing];
+  });
 
   // Drag state
   const dragKey = useRef<ColKey | null>(null);
@@ -619,6 +622,7 @@ export default function PortfolioDetailPage() {
                   {visibleCols.map((key) => {
                     const w: Record<string, string> = {
                       name: "28%",
+                      assetType: "8%",
                       qty: "5%",
                       cur: "8%",
                       buy: "8%",
@@ -724,6 +728,9 @@ export default function PortfolioDetailPage() {
                                 )}
                                 {key === "qty" && (
                                   <span className="font-mono tabular-nums">{r.qty}</span>
+                                )}
+                                {key === "assetType" && (
+                                  <span className="text-muted-foreground">{r.assetType}</span>
                                 )}
                                 {key === "cur" && (
                                   <span className="font-mono tabular-nums">{fmt$(r.cur)}</span>
