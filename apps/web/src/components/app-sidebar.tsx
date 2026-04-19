@@ -1,4 +1,5 @@
-import { BarChart3, LogOut, BookOpen, Bell, Settings, Bookmark } from "lucide-react";
+import { useEffect, useState } from "react";
+import { BarChart3, LogOut, BookOpen, Bell, Settings, Bookmark, PanelsTopLeft } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Sidebar,
@@ -16,14 +17,31 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface AppSidebarProps {
   activeThesisCount?: number;
 }
 
 export function AppSidebar({ activeThesisCount = 0 }: AppSidebarProps) {
-  const { state } = useSidebar();
+  const { state, setOpen, isMobile } = useSidebar();
   const collapsed = state === "collapsed";
+  const [sidebarMode, setSidebarMode] = useState<"expanded" | "collapsed" | "hover">(() => {
+    try {
+      const saved = localStorage.getItem("binturong.sidebar.mode");
+      if (saved === "expanded" || saved === "collapsed" || saved === "hover") return saved;
+    } catch {
+      // ignore
+    }
+    return "expanded";
+  });
   const location = useLocation();
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -42,8 +60,27 @@ export function AppSidebar({ activeThesisCount = 0 }: AppSidebarProps) {
     navigate("/login");
   };
 
+  useEffect(() => {
+    try {
+      localStorage.setItem("binturong.sidebar.mode", sidebarMode);
+    } catch {
+      // ignore
+    }
+
+    if (sidebarMode === "expanded") setOpen(true);
+    else setOpen(false);
+  }, [setOpen, sidebarMode]);
+
   return (
-    <Sidebar collapsible="icon">
+    <Sidebar
+      collapsible="icon"
+      onMouseEnter={() => {
+        if (!isMobile && sidebarMode === "hover") setOpen(true);
+      }}
+      onMouseLeave={() => {
+        if (!isMobile && sidebarMode === "hover") setOpen(false);
+      }}
+    >
       <SidebarHeader className="p-0 border-b border-border">
         <div className="flex items-center gap-2.5 px-4 h-14">
           <div className="h-7 w-7 rounded-md bg-primary/20 border border-primary/30 flex items-center justify-center text-primary shrink-0">
@@ -127,6 +164,31 @@ export function AppSidebar({ activeThesisCount = 0 }: AppSidebarProps) {
       </SidebarContent>
 
       <SidebarFooter className="p-3 border-t border-border">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size={collapsed ? "icon" : "sm"} className="w-full justify-start mb-1">
+              <PanelsTopLeft className="h-4 w-4" />
+              {!collapsed && <span className="ml-2">Sidebar control</span>}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="top" align="start" className="w-52">
+            <DropdownMenuLabel>Sidebar control</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => setSidebarMode("expanded")}>
+              <span className="mr-2 w-4 text-center">{sidebarMode === "expanded" ? "●" : ""}</span>
+              Expanded
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setSidebarMode("collapsed")}>
+              <span className="mr-2 w-4 text-center">{sidebarMode === "collapsed" ? "●" : ""}</span>
+              Collapsed
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setSidebarMode("hover")}>
+              <span className="mr-2 w-4 text-center">{sidebarMode === "hover" ? "●" : ""}</span>
+              Expand on hover
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
         <Button
           variant="ghost"
           size={collapsed ? "icon" : "sm"}
