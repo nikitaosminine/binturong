@@ -118,7 +118,7 @@ function AllocationSection({
   return (
     <div className="space-y-2.5">
       <div className="text-[10px] uppercase tracking-widest text-muted-foreground/80">{title}</div>
-      <div className="flex h-2 rounded-full overflow-hidden bg-[oklch(1_0_0/5%)]">
+      <div className="flex h-3 rounded-full overflow-hidden bg-[oklch(1_0_0/5%)]">
         {entries.map(([label, value], i) => (
           <div
             key={label}
@@ -579,8 +579,8 @@ export default function PortfolioDetailPage() {
         </div>
 
         {/* Chart + Sector allocation */}
-        <div className="grid grid-cols-10 gap-3">
-          <div className="col-span-6 rounded-lg border border-border/50 bg-card p-4">
+        <div className="grid grid-cols-4 gap-3">
+          <div className="col-span-3 rounded-lg border border-border/50 bg-card p-4">
             <div className="flex items-center justify-between mb-3">
               <div>
                 <div className="text-[11px] uppercase tracking-widest text-muted-foreground">
@@ -600,7 +600,7 @@ export default function PortfolioDetailPage() {
             </div>
             <PortfolioChart />
           </div>
-          <div className="col-span-4">
+          <div className="col-span-1">
             <SectorAllocationCard rows={rows} cashValue={cashValue} />
           </div>
         </div>
