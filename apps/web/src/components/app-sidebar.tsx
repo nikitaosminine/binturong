@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { BarChart3, LogOut, BookOpen, Bell, Settings, PanelsTopLeft } from "lucide-react";
 import { BarChart3, LogOut, BookOpen, Bell, Settings, Bookmark, PanelsTopLeft } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -47,7 +48,6 @@ export function AppSidebar({ activeThesisCount = 0 }: AppSidebarProps) {
   const { user } = useAuth();
   const isPortfolios = location.pathname.startsWith("/portfolios");
   const isTheTake = location.pathname.startsWith("/the-take");
-  const isWatchlist = location.pathname.startsWith("/watchlist");
 
   const displayName = user?.user_metadata?.full_name
     || user?.email?.split("@")[0]
@@ -69,6 +69,9 @@ export function AppSidebar({ activeThesisCount = 0 }: AppSidebarProps) {
 
     if (sidebarMode === "expanded") setOpen(true);
     else setOpen(false);
+    // setOpen changes identity when open state changes; we only want to react to mode changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sidebarMode]);
   }, [setOpen, sidebarMode]);
 
   return (
@@ -105,15 +108,6 @@ export function AppSidebar({ activeThesisCount = 0 }: AppSidebarProps) {
                   <Link to="/portfolios">
                     <BarChart3 className="h-4 w-4" />
                     {!collapsed && <span>Portfolios</span>}
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive={isWatchlist} tooltip="Watchlist">
-                  <Link to="/watchlist">
-                    <Bookmark className="h-4 w-4" />
-                    {!collapsed && <span>Watchlist</span>}
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

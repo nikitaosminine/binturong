@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
-import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ThesisCenteredModal } from "@/components/thesis-centered-modal";
 import { useAuth } from "@/hooks/use-auth";
@@ -25,7 +25,6 @@ function Topbar() {
   return (
     <header className="h-14 flex items-center justify-between gap-3 border-b border-border px-4 shrink-0">
       <div className="flex items-center gap-2">
-        <SidebarTrigger className="h-8 w-8" />
         <div className="flex items-center gap-1.5 text-sm">
           <span className="text-muted-foreground">Binturong</span>
           <span className="text-muted-foreground/50">/</span>
