@@ -105,6 +105,18 @@ export default function PrivateRoute() {
           <main className="flex-1 p-6 overflow-auto">
             <Outlet context={context} />
           </main>
+          <footer className="border-t border-border px-6 py-3 text-xs text-muted-foreground">
+            Charts powered by{" "}
+            <a
+              href="https://www.tradingview.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-foreground underline underline-offset-2 hover:text-primary"
+            >
+              TradingView
+            </a>
+            .
+          </footer>
         </div>
       </div>
       <ThesisCenteredModal

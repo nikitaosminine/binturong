@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { AreaSeries, createChart } from "lightweight-charts";
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 export interface PortfolioChartPoint {
@@ -55,72 +56,66 @@ export function PortfolioChart({ data }: PortfolioChartProps) {
     let chart: {
       remove: () => void;
       applyOptions: (options: { width: number }) => void;
-      addAreaSeries: (opts: Record<string, unknown>) => { setData: (data: unknown[]) => void };
+      addSeries: (
+        definition: unknown,
+        opts: Record<string, unknown>,
+      ) => { setData: (data: unknown[]) => void };
       timeScale: () => { fitContent: () => void };
     } | null = null;
     let resizeObserver: ResizeObserver | null = null;
 
-    const setup = async () => {
-      let lightweightCharts:
-        | { createChart: (el: HTMLElement, opts: Record<string, unknown>) => typeof chart }
-        | undefined;
-      try {
-        const importFromUrl = new Function("u", "return import(u)") as (u: string) => Promise<{
-          createChart: (el: HTMLElement, opts: Record<string, unknown>) => typeof chart;
-        }>;
-        lightweightCharts = await importFromUrl(
-          "https://esm.sh/gh/nikitaosminine/lightweight-charts",
-        );
-      } catch (error) {
-        console.error("[PortfolioChart] Failed to load lightweight-charts, using fallback.", error);
-        setChartUnavailable(true);
-        return;
-      }
+    const setup = () => {
       if (remove || !container) return;
       if (container.clientWidth === 0 || container.clientHeight === 0) return;
 
-      chart = lightweightCharts.createChart(container, {
-        width: container.clientWidth,
-        height: 300,
-        layout: {
-          background: { color: "transparent" },
-          textColor: "oklch(0.72 0.02 264)",
-        },
-        grid: {
-          vertLines: { color: "oklch(1 0 0 / 4%)" },
-          horzLines: { color: "oklch(1 0 0 / 4%)" },
-        },
-        rightPriceScale: {
-          borderColor: "oklch(1 0 0 / 8%)",
-        },
-        timeScale: {
-          borderColor: "oklch(1 0 0 / 8%)",
-        },
-        handleScroll: false,
-        handleScale: false,
-      });
+      try {
+        chart = createChart(container, {
+          width: container.clientWidth,
+          height: 300,
+          layout: {
+            background: { color: "transparent" },
+            textColor: "#A1A1AA",
+            attributionLogo: false,
+          },
+          grid: {
+            vertLines: { color: "rgba(255, 255, 255, 0.04)" },
+            horzLines: { color: "rgba(255, 255, 255, 0.04)" },
+          },
+          rightPriceScale: {
+            borderColor: "rgba(255, 255, 255, 0.08)",
+          },
+          timeScale: {
+            borderColor: "rgba(255, 255, 255, 0.08)",
+          },
+          handleScroll: false,
+          handleScale: false,
+        });
 
-      if (!chart) return;
-      const areaSeries = chart.addAreaSeries({
-        lineColor: "#22ab94",
-        topColor: "rgba(34, 171, 148, 0.24)",
-        bottomColor: "rgba(34, 171, 148, 0.03)",
-        lineWidth: 2,
-      });
+        if (!chart) return;
+        const areaSeries = chart.addSeries(AreaSeries, {
+          lineColor: "#22ab94",
+          topColor: "rgba(34, 171, 148, 0.24)",
+          bottomColor: "rgba(34, 171, 148, 0.03)",
+          lineWidth: 2,
+        });
 
-      const seriesData = filteredData.map((point) => ({
-        time: point.time,
-        value: point.value,
-      }));
-      console.log("[PortfolioChart] seriesData", seriesData);
-      areaSeries.setData(seriesData);
-      chart.timeScale().fitContent();
+        const seriesData = filteredData.map((point) => ({
+          time: point.time,
+          value: point.value,
+        }));
+        areaSeries.setData(seriesData);
+        chart.timeScale().fitContent();
+        setChartUnavailable(false);
 
-      resizeObserver = new ResizeObserver(() => {
-        if (!container || !chart) return;
-        chart.applyOptions({ width: container.clientWidth });
-      });
-      resizeObserver.observe(container);
+        resizeObserver = new ResizeObserver(() => {
+          if (!container || !chart) return;
+          chart.applyOptions({ width: container.clientWidth });
+        });
+        resizeObserver.observe(container);
+      } catch (error) {
+        console.error("[PortfolioChart] Failed to initialize lightweight chart, using fallback.", error);
+        setChartUnavailable(true);
+      }
     };
 
     frameId = window.requestAnimationFrame(() => {
@@ -133,10 +128,6 @@ export function PortfolioChart({ data }: PortfolioChartProps) {
       if (resizeObserver) resizeObserver.disconnect();
       if (chart) chart.remove();
     };
-  }, [filteredData]);
-
-  useEffect(() => {
-    console.log("[PortfolioChart] filteredData length", filteredData.length, filteredData);
   }, [filteredData]);
 
   return (

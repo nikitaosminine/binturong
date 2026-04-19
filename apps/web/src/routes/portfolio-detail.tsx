@@ -1,11 +1,9 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Link, useParams, useOutletContext } from "react-router-dom";
-import { ArrowLeft, Plus, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Trash2, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { getSector } from "@/lib/mock-data";
-import { Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
-import { BarChart3, PieChart as PieChartIcon } from "lucide-react";
 import { toast } from "sonner";
 import { TakeBadge } from "@/components/take-badge";
 import { Thesis, thesesForTicker, thesesForPortfolio } from "@/lib/thesis";
@@ -19,12 +17,29 @@ import {
   ContextMenuCheckboxItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface Holding {
   id: string;
   ticker: string;
   name: string;
   isin: string | null;
+  asset_type: string | null;
   quantity: number;
   purchase_price: number;
   fees: number;
@@ -82,14 +97,73 @@ function StatCard({
 }
 
 // Sector allocation sidebar card
-function SectorAllocationCard({ rows }: { rows: RowData[] }) {
-  const [view, setView] = useState<"bar" | "pie">("bar");
-  const total = rows.reduce((s, r) => s + r.total, 0);
+function normalizeAssetType(assetType: string | null) {
+  const value = assetType?.trim().toLowerCase();
+  if (!value) return "Other";
+  if (value.includes("etf")) return "ETF";
+  if (value.includes("bond") || value.includes("fixed")) return "Bonds";
+  if (value.includes("equity") || value.includes("stock")) return "Equity";
+  if (value.includes("cash")) return "Cash";
+  return "Other";
+}
+
+function AllocationSection({
+  title,
+  entries,
+  total,
+  colors,
+}: {
+  title: string;
+  entries: [string, number][];
+  total: number;
+  colors: string[];
+}) {
+  if (total <= 0) {
+    return <p className="text-xs text-muted-foreground">No data.</p>;
+  }
+  return (
+    <div className="space-y-2.5">
+      <div className="text-[10px] uppercase tracking-widest text-muted-foreground/80">{title}</div>
+      <div className="flex h-3 rounded-full overflow-hidden bg-[oklch(1_0_0/5%)]">
+        {entries.map(([label, value], i) => (
+          <div
+            key={label}
+            style={{ width: `${(value / total) * 100}%`, background: colors[i % colors.length] }}
+          />
+        ))}
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {entries.map(([label, value], i) => (
+          <div key={label} className="flex items-center gap-2 text-[11px]">
+            <span
+              className="h-2 w-2 rounded-sm shrink-0"
+              style={{ background: colors[i % colors.length] }}
+            />
+            <span className="flex-1 truncate">{label}</span>
+            <span className="font-mono tabular-nums text-muted-foreground">
+              {((value / total) * 100).toFixed(1)}%
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SectorAllocationCard({ rows, cashValue }: { rows: RowData[]; cashValue: number }) {
+  const holdingsTotal = rows.reduce((s, r) => s + r.total, 0);
   const bySector: Record<string, number> = {};
+  const byAssetType: Record<string, number> = {};
   rows.forEach((r) => {
     bySector[r.sector] = (bySector[r.sector] || 0) + r.total;
+    byAssetType[r.assetType] = (byAssetType[r.assetType] || 0) + r.total;
   });
-  const entries = Object.entries(bySector).sort((a, b) => b[1] - a[1]);
+  if (cashValue > 0) {
+    byAssetType.Cash = (byAssetType.Cash || 0) + cashValue;
+  }
+  const sectorEntries = Object.entries(bySector).sort((a, b) => b[1] - a[1]);
+  const assetTypeEntries = Object.entries(byAssetType).sort((a, b) => b[1] - a[1]);
+  const totalAssetMix = holdingsTotal + cashValue;
   const colors = [
     "oklch(0.65 0.19 250)",
     "oklch(0.70 0.15 160)",
@@ -98,125 +172,26 @@ function SectorAllocationCard({ rows }: { rows: RowData[] }) {
     "oklch(0.65 0.24 16)",
     "oklch(0.70 0.10 200)",
   ];
-  const pieData = entries.map(([name, value], i) => ({
-    name,
-    value,
-    fill: colors[i % colors.length],
-  }));
   return (
-    <div className="rounded-lg border border-border/50 bg-card p-4 h-full flex flex-col">
-      <div className="flex items-center justify-between mb-3">
-        <div className="text-[11px] uppercase tracking-widest text-muted-foreground">
-          Sector allocation
-        </div>
-        {total > 0 && (
-          <div className="flex items-center rounded-md border border-border overflow-hidden">
-            <button
-              onClick={() => setView("bar")}
-              className={`h-6 w-6 flex items-center justify-center transition-colors ${
-                view === "bar"
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-              }`}
-              aria-label="Bar view"
-            >
-              <BarChart3 className="h-3 w-3" />
-            </button>
-            <button
-              onClick={() => setView("pie")}
-              className={`h-6 w-6 flex items-center justify-center transition-colors ${
-                view === "pie"
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-              }`}
-              aria-label="Pie view"
-            >
-              <PieChartIcon className="h-3 w-3" />
-            </button>
-          </div>
-        )}
+    <div className="rounded-lg border border-border/50 bg-card p-4 flex flex-col">
+      <div className="text-[11px] uppercase tracking-widest text-muted-foreground mb-3">
+        Allocation
       </div>
-      {total > 0 ? (
-        view === "bar" ? (
-          <>
-            <div className="flex h-2 rounded-full overflow-hidden bg-[oklch(1_0_0/5%)]">
-              {entries.map(([s, v], i) => (
-                <div
-                  key={s}
-                  style={{ width: `${(v / total) * 100}%`, background: colors[i % colors.length] }}
-                />
-              ))}
-            </div>
-            <div className="mt-3 flex flex-col gap-1.5">
-              {entries.map(([s, v], i) => (
-                <div key={s} className="flex items-center gap-2 text-[11px]">
-                  <span
-                    className="h-2 w-2 rounded-sm shrink-0"
-                    style={{ background: colors[i % colors.length] }}
-                  />
-                  <span className="flex-1 truncate">{s}</span>
-                  <span className="font-mono tabular-nums text-muted-foreground">
-                    {((v / total) * 100).toFixed(1)}%
-                  </span>
-                </div>
-              ))}
-            </div>
-          </>
-        ) : (
-          <div className="flex flex-col items-center">
-            <div className="w-full h-32">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={pieData}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={28}
-                    outerRadius={56}
-                    paddingAngle={1}
-                    stroke="none"
-                  >
-                    {pieData.map((e, i) => (
-                      <Cell key={i} fill={e.fill} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: "oklch(0.18 0.03 264)",
-                      border: "1px solid oklch(1 0 0 / 8%)",
-                      borderRadius: "8px",
-                      color: "oklch(0.96 0.005 264)",
-                      fontSize: "11px",
-                    }}
-                    formatter={(v, name) => [
-                      `${((Number(v) / total) * 100).toFixed(1)}%`,
-                      String(name),
-                    ]}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="mt-2 w-full grid grid-cols-1 gap-1">
-              {entries.map(([s, v], i) => (
-                <div key={s} className="flex items-center gap-2 text-[11px]">
-                  <span
-                    className="h-2 w-2 rounded-sm shrink-0"
-                    style={{ background: colors[i % colors.length] }}
-                  />
-                  <span className="flex-1 truncate">{s}</span>
-                  <span className="font-mono tabular-nums text-muted-foreground">
-                    {((v / total) * 100).toFixed(1)}%
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )
-      ) : (
-        <p className="text-xs text-muted-foreground">No holdings data.</p>
-      )}
+      <div className="space-y-4">
+        <AllocationSection
+          title="By sector"
+          entries={sectorEntries}
+          total={holdingsTotal}
+          colors={colors}
+        />
+        <div className="h-px bg-border/60" />
+        <AllocationSection
+          title="By asset type"
+          entries={assetTypeEntries}
+          total={totalAssetMix}
+          colors={colors}
+        />
+      </div>
     </div>
   );
 }
@@ -224,6 +199,7 @@ function SectorAllocationCard({ rows }: { rows: RowData[] }) {
 // Column definitions
 const ALL_COLUMNS = [
   { key: "name", label: "Asset", align: "left" },
+  { key: "assetType", label: "Type", align: "left" },
   { key: "qty", label: "Qty", align: "right" },
   { key: "cur", label: "Current", align: "right" },
   { key: "buy", label: "Cost", align: "right" },
@@ -250,6 +226,7 @@ interface RowData {
   gl: number;
   weight: number;
   sector: string;
+  assetType: string;
   perf1D: number;
   perfYTD: number;
 }
@@ -261,7 +238,7 @@ interface LiveQuote {
   ytdChangePercent: number | null;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? "https://binturong-api.nikita-osminine.workers.dev" : "http://localhost:8787");
 
 const DEFAULT_ORDER: ColKey[] = ALL_COLUMNS.map((c) => c.key);
 
@@ -283,9 +260,12 @@ function saveLS(key: string, val: unknown) {
 export default function PortfolioDetailPage() {
   const { portfolioId } = useParams<{ portfolioId: string }>();
   const { theses, openDrawer, openModal, updateThesis } = useOutletContext<ThesisContext>();
-  const [portfolio, setPortfolio] = useState<{ name: string; description: string | null } | null>(
-    null,
-  );
+  const [portfolio, setPortfolio] = useState<{
+    id: string;
+    name: string;
+    description: string | null;
+    cash_value: number;
+  } | null>(null);
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [loading, setLoading] = useState(true);
   const [liveQuotes, setLiveQuotes] = useState<Record<string, LiveQuote>>({});
@@ -300,9 +280,11 @@ export default function PortfolioDetailPage() {
   );
 
   // Column order
-  const [colOrder, setColOrder] = useState<ColKey[]>(() =>
-    loadLS(`binturong.columns.order.${portfolioId}`, DEFAULT_ORDER),
-  );
+  const [colOrder, setColOrder] = useState<ColKey[]>(() => {
+    const saved = loadLS(`binturong.columns.order.${portfolioId}`, DEFAULT_ORDER);
+    const missing = DEFAULT_ORDER.filter((k) => !saved.includes(k));
+    return [...saved, ...missing];
+  });
 
   // Drag state
   const dragKey = useRef<ColKey | null>(null);
@@ -310,10 +292,18 @@ export default function PortfolioDetailPage() {
   // Edit/delete modal
   const [editingHolding, setEditingHolding] = useState<Holding | null>(null);
   const [addHoldingOpen, setAddHoldingOpen] = useState(false);
+  const [cashDialogOpen, setCashDialogOpen] = useState(false);
+  const [cashAction, setCashAction] = useState<"deposit" | "withdraw">("deposit");
+  const [cashAmount, setCashAmount] = useState("");
+  const [cashSubmitting, setCashSubmitting] = useState(false);
 
   const load = async () => {
     const [pRes, hRes] = await Promise.all([
-      supabase.from("portfolios").select("name, description").eq("id", portfolioId!).single(),
+      supabase
+        .from("portfolios")
+        .select("id, name, description, cash_value")
+        .eq("id", portfolioId!)
+        .single(),
       supabase.from("holdings").select("*").eq("portfolio_id", portfolioId!),
     ]);
     if (pRes.error) toast.error("Failed to load portfolio");
@@ -336,7 +326,7 @@ export default function PortfolioDetailPage() {
     saveLS(`binturong.columns.order.${portfolioId}`, colOrder);
   }, [colOrder, portfolioId]);
 
-  const totalValue = useMemo(
+  const holdingsValue = useMemo(
     () =>
       holdings.reduce((s, h) => {
         const livePrice = liveQuotes[h.ticker.toUpperCase()]?.currentPrice;
@@ -345,10 +335,13 @@ export default function PortfolioDetailPage() {
       }, 0),
     [holdings, liveQuotes],
   );
-  const totalCost = useMemo(
+  const holdingsCost = useMemo(
     () => holdings.reduce((s, h) => s + h.purchase_price * h.quantity, 0),
     [holdings],
   );
+  const cashValue = portfolio?.cash_value ?? 0;
+  const totalValue = holdingsValue + cashValue;
+  const totalCost = holdingsCost + cashValue;
   const totalPL = totalValue - totalCost;
   const returnPct = totalCost > 0 ? (totalPL / totalCost) * 100 : 0;
 
@@ -373,6 +366,7 @@ export default function PortfolioDetailPage() {
         gl,
         weight,
         sector: getSector(h.ticker),
+        assetType: normalizeAssetType(h.asset_type),
         perf1D,
         perfYTD,
         // keep original for modal
@@ -477,6 +471,53 @@ export default function PortfolioDetailPage() {
     }
   };
 
+  const submitCashChange = async () => {
+    if (!portfolio) return;
+    const amount = Number(cashAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error("Enter a valid amount");
+      return;
+    }
+
+    const currentCash = portfolio.cash_value ?? 0;
+    const delta = cashAction === "deposit" ? amount : -amount;
+    const nextCash = currentCash + delta;
+    if (nextCash < 0) {
+      toast.error("Withdrawal exceeds available cash");
+      return;
+    }
+
+    try {
+      setCashSubmitting(true);
+      const { error } = await supabase
+        .from("portfolios")
+        .update({ cash_value: nextCash })
+        .eq("id", portfolio.id);
+      if (error) throw error;
+      setPortfolio((prev) => (prev ? { ...prev, cash_value: nextCash } : prev));
+      toast.success(cashAction === "deposit" ? "Cash deposited" : "Cash withdrawn");
+      setCashAmount("");
+      setCashDialogOpen(false);
+    } catch {
+      toast.error("Failed to update cash");
+    } finally {
+      setCashSubmitting(false);
+    }
+  };
+
+  const copyIsin = async (isin: string | null) => {
+    if (!isin) {
+      toast.error("No ISIN available for this holding");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(isin);
+      toast.success("ISIN copied");
+    } catch {
+      toast.error("Failed to copy ISIN");
+    }
+  };
+
   if (loading)
     return (
       <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">
@@ -522,14 +563,27 @@ export default function PortfolioDetailPage() {
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={() => setAddHoldingOpen(true)}>
-              <Plus className="h-3.5 w-3.5 mr-1.5" />+ Add holding
+              <Plus className="h-3.5 w-3.5 mr-1.5" />
+              Add holding
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setCashAction("deposit");
+                setCashDialogOpen(true);
+              }}
+            >
+              <Plus className="h-3.5 w-3.5 mr-1.5" />
+              Add cash
             </Button>
           </div>
         </div>
 
         {/* Stats strip */}
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-5 gap-3">
           <StatCard label="Total value" value={fmt$(totalValue)} />
+          <StatCard label="Cash value" value={fmt$(cashValue)} muted />
           <StatCard label="Cost basis" value={fmt$(totalCost)} muted />
           <StatCard
             label="Unrealized P/L"
@@ -566,7 +620,7 @@ export default function PortfolioDetailPage() {
             <PortfolioChart />
           </div>
           <div className="col-span-1">
-            <SectorAllocationCard rows={rows} />
+            <SectorAllocationCard rows={rows} cashValue={cashValue} />
           </div>
         </div>
 
@@ -587,6 +641,7 @@ export default function PortfolioDetailPage() {
                   {visibleCols.map((key) => {
                     const w: Record<string, string> = {
                       name: "28%",
+                      assetType: "8%",
                       qty: "5%",
                       cur: "8%",
                       buy: "8%",
@@ -674,11 +729,24 @@ export default function PortfolioDetailPage() {
                               <td key={key} className={`px-2 py-2 text-[12px] ${alignCls}`}>
                                 {key === "name" && (
                                   <div className="flex items-center gap-2">
-                                    <div className="h-6 w-6 rounded-md bg-[oklch(1_0_0/5%)] border border-border flex items-center justify-center shrink-0">
-                                      <span className="font-mono text-[9px] font-semibold">
-                                        {r.ticker.slice(0, 2)}
-                                      </span>
-                                    </div>
+                                    <TooltipProvider>
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-6 w-6 rounded-md border border-border bg-[oklch(1_0_0/5%)]"
+                                            onClick={() => copyIsin(r.isin)}
+                                            aria-label="Copy ISIN"
+                                          >
+                                            <Copy className="h-3 w-3" />
+                                          </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                          <p>{r.isin ? "Copy ISIN" : "No ISIN"}</p>
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    </TooltipProvider>
                                     <div className="min-w-0">
                                       <div className="text-[12px] font-medium truncate">
                                         {r.name}
@@ -692,6 +760,9 @@ export default function PortfolioDetailPage() {
                                 )}
                                 {key === "qty" && (
                                   <span className="font-mono tabular-nums">{r.qty}</span>
+                                )}
+                                {key === "assetType" && (
+                                  <span className="text-muted-foreground">{r.assetType}</span>
                                 )}
                                 {key === "cur" && (
                                   <span className="font-mono tabular-nums">{fmt$(r.cur)}</span>
@@ -803,6 +874,55 @@ export default function PortfolioDetailPage() {
             load();
           }}
         />
+
+        <Dialog open={cashDialogOpen} onOpenChange={setCashDialogOpen}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle>{cashAction === "deposit" ? "Deposit cash" : "Withdraw cash"}</DialogTitle>
+              <DialogDescription>
+                Current cash balance: <span className="font-mono">{fmt$(cashValue)}</span>
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant={cashAction === "deposit" ? "default" : "outline"}
+                  onClick={() => setCashAction("deposit")}
+                >
+                  Deposit
+                </Button>
+                <Button
+                  type="button"
+                  variant={cashAction === "withdraw" ? "default" : "outline"}
+                  onClick={() => setCashAction("withdraw")}
+                >
+                  Withdraw
+                </Button>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="cash-amount">Amount</Label>
+                <Input
+                  id="cash-amount"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={cashAmount}
+                  onChange={(e) => setCashAmount(e.target.value)}
+                  placeholder="0.00"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setCashDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="button" disabled={cashSubmitting} onClick={submitCashChange}>
+                {cashSubmitting ? "Saving…" : cashAction === "deposit" ? "Deposit cash" : "Withdraw cash"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Edit holding modal */}
         {editingHolding && (

@@ -30,11 +30,12 @@ interface AssetSearchResult {
   assetType: string;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? "https://binturong-api.nikita-osminine.workers.dev" : "http://localhost:8787");
 
 export function AddHoldingModal({ open, onOpenChange, portfolioId, onAdded }: Props) {
   const [ticker, setTicker] = useState("");
   const [name, setName] = useState("");
+  const [assetType, setAssetType] = useState("");
   const [isin, setIsin] = useState("");
   const [date, setDate] = useState<Date | undefined>(undefined);
   const [price, setPrice] = useState("");
@@ -48,6 +49,7 @@ export function AddHoldingModal({ open, onOpenChange, portfolioId, onAdded }: Pr
   const reset = () => {
     setTicker("");
     setName("");
+    setAssetType("");
     setIsin("");
     setDate(undefined);
     setPrice("");
@@ -65,6 +67,7 @@ export function AddHoldingModal({ open, onOpenChange, portfolioId, onAdded }: Pr
   const searchStocks = (q: string) => {
     setTicker(q);
     setName("");
+    setAssetType("");
     if (q.length === 0) {
       setSearchResults([]);
       setShowSearch(false);
@@ -106,6 +109,7 @@ export function AddHoldingModal({ open, onOpenChange, portfolioId, onAdded }: Pr
   const selectStock = (s: AssetSearchResult) => {
     setTicker(s.ticker);
     setName(s.name);
+    setAssetType(s.assetType);
     setIsin("");
     setSearchResults([]);
     setShowSearch(false);
@@ -122,6 +126,7 @@ export function AddHoldingModal({ open, onOpenChange, portfolioId, onAdded }: Pr
         portfolio_id: portfolioId,
         ticker: ticker.toUpperCase(),
         name: name || ticker.toUpperCase(),
+        asset_type: assetType || null,
         isin: isin || null,
         purchase_date: format(date, "yyyy-MM-dd"),
         purchase_price: parseFloat(price) || 0,
@@ -161,6 +166,7 @@ export function AddHoldingModal({ open, onOpenChange, portfolioId, onAdded }: Pr
               onBlur={() => setTimeout(() => setShowSearch(false), 200)}
             />
             {name && <p className="text-xs text-muted-foreground mt-0.5">{name}</p>}
+            {assetType && <p className="text-xs text-muted-foreground">{assetType}</p>}
             {searchLoading && <p className="text-xs text-muted-foreground mt-0.5">Searching…</p>}
             {showSearch && searchResults.length > 0 && (
               <div className="absolute z-50 mt-1 w-full rounded-md border border-border/50 bg-popover shadow-lg">
