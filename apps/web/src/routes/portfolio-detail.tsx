@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Link, useParams, useOutletContext } from "react-router-dom";
-import { ArrowLeft, Plus, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Trash2, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { getSector } from "@/lib/mock-data";
@@ -27,6 +27,12 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface Holding {
   id: string;
@@ -499,6 +505,19 @@ export default function PortfolioDetailPage() {
     }
   };
 
+  const copyIsin = async (isin: string | null) => {
+    if (!isin) {
+      toast.error("No ISIN available for this holding");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(isin);
+      toast.success("ISIN copied");
+    } catch {
+      toast.error("Failed to copy ISIN");
+    }
+  };
+
   if (loading)
     return (
       <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">
@@ -710,11 +729,24 @@ export default function PortfolioDetailPage() {
                               <td key={key} className={`px-2 py-2 text-[12px] ${alignCls}`}>
                                 {key === "name" && (
                                   <div className="flex items-center gap-2">
-                                    <div className="h-6 w-6 rounded-md bg-[oklch(1_0_0/5%)] border border-border flex items-center justify-center shrink-0">
-                                      <span className="font-mono text-[9px] font-semibold">
-                                        {r.ticker.slice(0, 2)}
-                                      </span>
-                                    </div>
+                                    <TooltipProvider>
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-6 w-6 rounded-md border border-border bg-[oklch(1_0_0/5%)]"
+                                            onClick={() => copyIsin(r.isin)}
+                                            aria-label="Copy ISIN"
+                                          >
+                                            <Copy className="h-3 w-3" />
+                                          </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                          <p>{r.isin ? "Copy ISIN" : "No ISIN"}</p>
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    </TooltipProvider>
                                     <div className="min-w-0">
                                       <div className="text-[12px] font-medium truncate">
                                         {r.name}
