@@ -104,7 +104,7 @@ function SectorAllocationCard({ rows }: { rows: RowData[] }) {
     fill: colors[i % colors.length],
   }));
   return (
-    <div className="rounded-lg border border-border/50 bg-card p-4 h-full flex flex-col">
+    <div className="rounded-lg border border-border/50 bg-card p-4 flex flex-col">
       <div className="flex items-center justify-between mb-3">
         <div className="text-[11px] uppercase tracking-widest text-muted-foreground">
           Sector allocation
@@ -164,7 +164,7 @@ function SectorAllocationCard({ rows }: { rows: RowData[] }) {
           </>
         ) : (
           <div className="flex flex-col items-center">
-            <div className="w-full h-32">
+            <div className="w-full h-44">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -173,8 +173,8 @@ function SectorAllocationCard({ rows }: { rows: RowData[] }) {
                     nameKey="name"
                     cx="50%"
                     cy="50%"
-                    innerRadius={28}
-                    outerRadius={56}
+                    innerRadius={38}
+                    outerRadius={80}
                     paddingAngle={1}
                     stroke="none"
                   >
