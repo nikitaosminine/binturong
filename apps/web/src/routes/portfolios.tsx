@@ -28,6 +28,7 @@ interface Portfolio {
   name: string;
   description: string | null;
   created_at: string;
+  cash_value: number | null;
   holdings: Holding[];
 }
 
@@ -39,11 +40,11 @@ function fmtPct(n: number) {
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
 }
 
-function portfolioValue(holdings: Holding[]) {
+function holdingsValue(holdings: Holding[]) {
   return holdings.reduce((s, h) => s + (MOCK_PRICES[h.ticker] ?? h.purchase_price) * h.quantity, 0);
 }
 
-function portfolioCost(holdings: Holding[]) {
+function holdingsCost(holdings: Holding[]) {
   return holdings.reduce((s, h) => s + h.purchase_price * h.quantity, 0);
 }
 
@@ -89,8 +90,9 @@ function PortfolioCard({
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const val = portfolioValue(portfolio.holdings);
-  const cost = portfolioCost(portfolio.holdings);
+  const cash = portfolio.cash_value ?? 0;
+  const val = holdingsValue(portfolio.holdings) + cash;
+  const cost = holdingsCost(portfolio.holdings) + cash;
   const pl = val - cost;
   const plPct = cost > 0 ? (pl / cost) * 100 : 0;
   const positive = pl >= 0;
@@ -258,8 +260,15 @@ export default function PortfoliosPage() {
     fetchPortfolios();
   };
 
-  const totalValue = useMemo(() => portfolios.reduce((s, p) => s + portfolioValue(p.holdings), 0), [portfolios]);
-  const totalCost  = useMemo(() => portfolios.reduce((s, p) => s + portfolioCost(p.holdings), 0), [portfolios]);
+  const totalValue = useMemo(
+    () => portfolios.reduce((s, p) => s + holdingsValue(p.holdings) + (p.cash_value ?? 0), 0),
+    [portfolios],
+  );
+  const totalCash = useMemo(() => portfolios.reduce((s, p) => s + (p.cash_value ?? 0), 0), [portfolios]);
+  const totalCost = useMemo(
+    () => portfolios.reduce((s, p) => s + holdingsCost(p.holdings) + (p.cash_value ?? 0), 0),
+    [portfolios],
+  );
   const totalPL    = totalValue - totalCost;
   const returnPct  = totalCost > 0 ? (totalPL / totalCost) * 100 : 0;
 
@@ -285,8 +294,9 @@ export default function PortfoliosPage() {
       </div>
 
       {portfolios.length > 0 && (
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-5 gap-3">
           <StatCard label="Total value"    value={fmt$(totalValue)} />
+          <StatCard label="Cash value"     value={fmt$(totalCash)} muted />
           <StatCard label="Total cost"     value={fmt$(totalCost)} muted />
           <StatCard label="Unrealized P/L" value={fmt$(totalPL)}   tone={totalPL >= 0 ? "positive" : "negative"} />
           <StatCard label="Return"         value={fmtPct(returnPct)} tone={returnPct >= 0 ? "positive" : "negative"} />
