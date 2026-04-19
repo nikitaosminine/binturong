@@ -57,22 +57,17 @@ interface YahooSearchResponse {
 }
 
 interface YahooQuoteItem {
-  symbol?: string;
-  regularMarketPrice?: number | null;
-  postMarketPrice?: number | null;
-  preMarketPrice?: number | null;
-  regularMarketChangePercent?: number | null;
-}
-
-interface YahooQuoteResponse {
-  quoteResponse?: {
-    result?: YahooQuoteItem[];
-  };
+  currentPrice: number | null;
+  change1dPercent: number | null;
 }
 
 interface YahooChartResponse {
   chart?: {
     result?: Array<{
+      meta?: {
+        regularMarketPrice?: number | null;
+        previousClose?: number | null;
+      };
       timestamp?: number[];
       indicators?: {
         quote?: Array<{
@@ -81,6 +76,36 @@ interface YahooChartResponse {
       };
     }>;
   };
+}
+
+async function getQuoteFromChart(symbol: string): Promise<YahooQuoteItem> {
+  try {
+    const url = new URL(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`);
+    url.searchParams.set("interval", "1d");
+    url.searchParams.set("range", "1d");
+
+    const chart = await fetchJson<YahooChartResponse>(url.toString());
+    const series = chart.chart?.result?.[0];
+    const meta = series?.meta;
+    const closes = series?.indicators?.quote?.[0]?.close ?? [];
+    const latestClose = [...closes].reverse().find((value) => value != null) ?? null;
+    const currentPrice = meta?.regularMarketPrice ?? latestClose;
+    const previousClose = meta?.previousClose ?? null;
+    const change1dPercent =
+      currentPrice != null && previousClose != null && previousClose !== 0
+        ? ((currentPrice - previousClose) / previousClose) * 100
+        : null;
+
+    return {
+      currentPrice,
+      change1dPercent,
+    };
+  } catch {
+    return {
+      currentPrice: null,
+      change1dPercent: null,
+    };
+  }
 }
 
 async function getYtdChangePercent(symbol: string): Promise<number | null> {
@@ -219,28 +244,17 @@ export default {
       if (symbols.length === 0) return json([]);
 
       try {
-        const quoteUrl = new URL("https://query1.finance.yahoo.com/v7/finance/quote");
-        quoteUrl.searchParams.set("symbols", symbols.join(","));
-
-        const [quotesResponse, ytdChanges] = await Promise.all([
-          fetchJson<YahooQuoteResponse>(quoteUrl.toString()),
+        const [quotes, ytdChanges] = await Promise.all([
+          Promise.all(symbols.map((symbol) => getQuoteFromChart(symbol))),
           Promise.all(symbols.map((symbol) => getYtdChangePercent(symbol))),
         ]);
 
-        const quoteMap = new Map<string, YahooQuoteItem>(
-          (quotesResponse.quoteResponse?.result || [])
-            .filter((quote) => quote.symbol)
-            .map((quote) => [quote.symbol!, quote]),
-        );
-
         const data = symbols.map((symbol, i) => {
-          const quote = quoteMap.get(symbol);
-          const current =
-            quote?.regularMarketPrice ?? quote?.postMarketPrice ?? quote?.preMarketPrice ?? null;
+          const quote = quotes[i];
           return {
             ticker: symbol,
-            currentPrice: current,
-            change1dPercent: quote?.regularMarketChangePercent ?? null,
+            currentPrice: quote.currentPrice,
+            change1dPercent: quote.change1dPercent,
             ytdChangePercent: ytdChanges[i],
           };
         });
