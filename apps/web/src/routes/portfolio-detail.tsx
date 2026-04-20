@@ -636,27 +636,25 @@ export default function PortfolioDetailPage() {
                 {rows.length} positions
               </div>
             </div>
-            <div className="overflow-x-hidden">
-              <table className="w-full table-fixed">
+            <div className="overflow-x-auto">
+              <table className="w-full table-auto">
                 <colgroup>
                   {visibleCols.map((key) => {
                     const w: Record<string, string> = {
-                      name: "28%",
-                      assetType: "8%",
-                      qty: "5%",
-                      cur: "8%",
-                      buy: "8%",
-                      total: "8%",
-                      gl: "9%",
-                      weight: "6%",
-                      sector: "11%",
-                      perf1D: "6%",
-                      perfYTD: "6%",
-                      take: "5%",
+                      name: "340px",
+                      qty: "64px",
+                      cur: "104px",
+                      buy: "104px",
+                      total: "104px",
+                      gl: "112px",
+                      weight: "78px",
+                      perf1D: "76px",
+                      perfYTD: "76px",
+                      take: "52px",
                     };
                     return <col key={key} style={{ width: w[key] ?? "auto" }} />;
                   })}
-                  <col style={{ width: "5%" }} />
+                  <col style={{ width: "52px" }} />
                 </colgroup>
                 <thead>
                   <tr className="border-b border-border">

@@ -93,11 +93,25 @@ interface YahooQuoteResponse {
 interface YahooQuoteSummaryResponse {
   quoteSummary?: {
     result?: Array<{
+      summaryProfile?: {
+        sector?: string;
+      };
       assetProfile?: {
         sector?: string;
       };
+      fundProfile?: {
+        categoryName?: string;
+        fundFamily?: string;
+      };
     }>;
   };
+}
+
+function normalizeSectorLabel(value: string | null | undefined): string | null {
+  const cleaned = value?.trim();
+  if (!cleaned) return null;
+  if (cleaned.toLowerCase() === "n/a") return null;
+  return cleaned;
 }
 
 async function getSectorsForSymbols(symbols: string[]): Promise<Record<string, string>> {
@@ -105,9 +119,14 @@ async function getSectorsForSymbols(symbols: string[]): Promise<Record<string, s
     symbols.map(async (symbol) => {
       try {
         const url = new URL(`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${symbol}`);
-        url.searchParams.set("modules", "assetProfile");
+        url.searchParams.set("modules", "summaryProfile,assetProfile,fundProfile");
         const summary = await fetchJson<YahooQuoteSummaryResponse>(url.toString());
-        const sector = summary.quoteSummary?.result?.[0]?.assetProfile?.sector;
+        const profile = summary.quoteSummary?.result?.[0];
+        const sector =
+          normalizeSectorLabel(profile?.summaryProfile?.sector) ??
+          normalizeSectorLabel(profile?.assetProfile?.sector) ??
+          normalizeSectorLabel(profile?.fundProfile?.categoryName) ??
+          normalizeSectorLabel(profile?.fundProfile?.fundFamily);
         if (!sector) return [symbol, "Other"] as const;
         return [symbol, sector] as const;
       } catch {
