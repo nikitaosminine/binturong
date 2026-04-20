@@ -107,6 +107,42 @@ function normalizeAssetType(assetType: string | null) {
   return "Other";
 }
 
+function inferSectorFromHolding(
+  ticker: string,
+  name: string,
+  assetType: string | null,
+): string {
+  const symbol = ticker.toUpperCase();
+  const baseTicker = symbol.split(".")[0];
+  const label = name.toLowerCase();
+  const type = (assetType || "").toLowerCase();
+
+  const explicitTickerSector: Record<string, string> = {
+    "SU.PA": "Industrials",
+    "LR.PA": "Industrials",
+    "TTE.PA": "Energy",
+    "ALSEM.PA": "Technology",
+  };
+  if (explicitTickerSector[symbol]) return explicitTickerSector[symbol];
+  if (explicitTickerSector[baseTicker]) return explicitTickerSector[baseTicker];
+
+  if (type.includes("etf") || type.includes("fund")) {
+    if (label.includes("tech") || label.includes("nasdaq")) return "Technology";
+    if (label.includes("energy")) return "Energy";
+    if (label.includes("europe") || label.includes("msci") || label.includes("s&p"))
+      return "Broad Market";
+    return "ETF";
+  }
+
+  if (label.includes("electric") || label.includes("industrial")) return "Industrials";
+  if (label.includes("energy") || label.includes("totalenergies")) return "Energy";
+  if (label.includes("technology") || label.includes("tech")) return "Technology";
+  if (label.includes("bank") || label.includes("financial")) return "Financials";
+  if (label.includes("health")) return "Healthcare";
+
+  return "Other";
+}
+
 function AllocationSection({
   title,
   entries,
@@ -236,6 +272,7 @@ interface LiveQuote {
   currentPrice: number | null;
   change1dPercent: number | null;
   ytdChangePercent: number | null;
+  sector?: string | null;
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? "https://binturong-api.nikita-osminine.workers.dev" : "http://localhost:8787");
@@ -365,7 +402,10 @@ export default function PortfolioDetailPage() {
         total,
         gl,
         weight,
-        sector: getSector(h.ticker),
+        sector:
+          live?.sector && live.sector !== "Other"
+            ? live.sector
+            : inferSectorFromHolding(h.ticker, h.name, h.asset_type) || getSector(h.ticker),
         assetType: normalizeAssetType(h.asset_type),
         perf1D,
         perfYTD,
@@ -635,27 +675,27 @@ export default function PortfolioDetailPage() {
                 {rows.length} positions
               </div>
             </div>
-            <div className="overflow-x-hidden">
-              <table className="w-full table-fixed">
+            <div className="overflow-x-auto">
+              <table className="w-full table-auto">
                 <colgroup>
                   {visibleCols.map((key) => {
                     const w: Record<string, string> = {
-                      name: "28%",
-                      assetType: "8%",
-                      qty: "5%",
-                      cur: "8%",
-                      buy: "8%",
-                      total: "8%",
-                      gl: "9%",
-                      weight: "6%",
-                      sector: "11%",
-                      perf1D: "6%",
-                      perfYTD: "6%",
-                      take: "5%",
+                      name: "340px",
+                      assetType: "96px",
+                      qty: "64px",
+                      cur: "104px",
+                      buy: "104px",
+                      total: "104px",
+                      gl: "112px",
+                      weight: "78px",
+                      sector: "110px",
+                      perf1D: "76px",
+                      perfYTD: "76px",
+                      take: "52px",
                     };
                     return <col key={key} style={{ width: w[key] ?? "auto" }} />;
                   })}
-                  <col style={{ width: "5%" }} />
+                  <col style={{ width: "52px" }} />
                 </colgroup>
                 <thead>
                   <tr className="border-b border-border">

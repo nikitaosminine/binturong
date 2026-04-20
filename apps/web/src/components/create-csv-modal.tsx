@@ -9,6 +9,133 @@ import { MOCK_STOCKS, CSV_TEMPLATE } from "@/lib/mock-data";
 import Papa from "papaparse";
 import { toast } from "sonner";
 
+interface AssetSearchResult {
+  ticker: string;
+  name: string;
+  exchange: string;
+  assetType: string;
+}
+
+interface ParsedCsvRow extends Record<string, string> {
+  __row: number;
+  __ticker: string;
+  __exchange: string;
+  __date: string;
+  __price: number;
+  __quantity: number;
+  __fees: number;
+  __isin: string;
+}
+
+const EXCHANGE_ALIASES: Record<string, string> = {
+  EURONEXT: "PAR",
+  "EURONEXT PARIS": "PAR",
+  PARIS: "PAR",
+  XPAR: "PAR",
+  NYSE: "NYQ",
+  NASDAQ: "NMS",
+  NASDAQGS: "NMS",
+  XETRA: "GER",
+  SIX: "EBS",
+  LSE: "LSE",
+  LONDON: "LSE",
+  TSX: "TOR",
+  TSE: "TYO",
+  HKEX: "HKG",
+};
+
+function normalizeExchange(raw: string | undefined): string {
+  const normalized = raw?.trim().toUpperCase() || "";
+  if (!normalized) return "";
+  return EXCHANGE_ALIASES[normalized] ?? normalized;
+}
+
+function parseFlexibleNumber(raw: string | undefined): number {
+  const value = raw?.trim() || "";
+  if (!value) return 0;
+  const compact = value.replace(/\s+/g, "");
+  const lastComma = compact.lastIndexOf(",");
+  const lastDot = compact.lastIndexOf(".");
+
+  if (lastComma > -1 && lastDot > -1) {
+    const decimalSeparator = lastComma > lastDot ? "," : ".";
+    const thousandsSeparator = decimalSeparator === "," ? "." : ",";
+    const normalized = compact
+      .split(thousandsSeparator)
+      .join("")
+      .replace(decimalSeparator, ".");
+    return parseFloat(normalized) || 0;
+  }
+
+  if (lastComma > -1) {
+    const parts = compact.split(",");
+    if (parts.length === 2 && parts[1].length === 3 && parts[0].length >= 1) {
+      return parseFloat(parts.join("")) || 0;
+    }
+    const normalized = compact.replace(",", ".");
+    return parseFloat(normalized) || 0;
+  }
+
+  return parseFloat(compact) || 0;
+}
+
+function normalizeFlexibleDate(raw: string | undefined): string {
+  const value = raw?.trim() || "";
+  if (!value) throw new Error("Missing date");
+
+  const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return value;
+
+  const dmyOrMdy = value.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (dmyOrMdy) {
+    const first = Number(dmyOrMdy[1]);
+    const second = Number(dmyOrMdy[2]);
+    const year = Number(dmyOrMdy[3]);
+    if (first < 1 || first > 31 || second < 1 || second > 31) throw new Error("Invalid date");
+
+    const day = first > 12 ? first : second > 12 ? second : first;
+    const month = first > 12 ? second : second > 12 ? first : second;
+    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) throw new Error("Invalid date");
+  return `${parsed.getUTCFullYear()}-${String(parsed.getUTCMonth() + 1).padStart(2, "0")}-${String(parsed.getUTCDate()).padStart(2, "0")}`;
+}
+
+function pickBestSearchMatch(
+  inputTicker: string,
+  inputExchange: string | undefined,
+  matches: AssetSearchResult[],
+) {
+  if (matches.length === 0) return null;
+
+  const normalized = inputTicker.trim().toUpperCase();
+  const normalizedExchange = inputExchange?.trim().toUpperCase();
+  const exact = matches.find((item) => item.ticker.toUpperCase() === normalized);
+  if (exact) return exact;
+
+  if (normalizedExchange) {
+    const exchangeMatched = matches.find(
+      (item) =>
+        item.exchange?.trim().toUpperCase() === normalizedExchange ||
+        item.ticker.toUpperCase().endsWith(`.${normalizedExchange}`),
+    );
+    if (exchangeMatched) return exchangeMatched;
+  }
+
+  const prefix = matches.find((item) => item.ticker.toUpperCase().startsWith(`${normalized}.`));
+  if (prefix) return prefix;
+
+  return matches[0];
+}
+
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL ??
+  (import.meta.env.PROD
+    ? "https://binturong-api.nikita-osminine.workers.dev"
+    : "http://localhost:8787");
+
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -65,17 +192,87 @@ export function CreateCsvModal({ open, onOpenChange, onCreated }: Props) {
 
       if (pErr) throw pErr;
 
-      const holdings = (result.data as any[]).map((row) => {
-        const stock = MOCK_STOCKS.find((s) => s.ticker === row.Ticker?.toUpperCase());
+      const parsedRows = result.data as Array<Record<string, string>>;
+      const normalizedRows: ParsedCsvRow[] = parsedRows.map((row, index) => {
+        const rowNum = index + 2;
+        const ticker = (row.Ticker || "").toUpperCase().trim();
+        const exchange = normalizeExchange(row.Exchange);
+        const isin = row.ISIN?.trim().toUpperCase() || "";
+        if (!ticker) throw new Error(`Missing ticker on CSV row ${rowNum}`);
+
+        try {
+          return {
+            ...row,
+            __row: rowNum,
+            __ticker: ticker,
+            __exchange: exchange,
+            __date: normalizeFlexibleDate(row.Date),
+            __price: parseFlexibleNumber(row.Price),
+            __quantity: parseFlexibleNumber(row.Quantity),
+            __fees: parseFlexibleNumber(row.Fees),
+            __isin: isin,
+          };
+        } catch (error) {
+          throw new Error(
+            error instanceof Error
+              ? `${error.message} on CSV row ${rowNum}`
+              : `Invalid data on CSV row ${rowNum}`,
+          );
+        }
+      });
+
+      const uniqueLookups = Array.from(
+        new Set(
+          normalizedRows
+            .map((row) => {
+              if (!row.__ticker) return "";
+              return `${row.__ticker}|${row.__exchange}|${row.__isin}`;
+            })
+            .filter(Boolean),
+        ),
+      );
+
+      const metadataEntries = await Promise.all(
+        uniqueLookups.map(async (lookupKey) => {
+          const [ticker, exchange, isin] = lookupKey.split("|");
+          const query = isin || (exchange ? `${ticker} ${exchange}` : ticker);
+          try {
+            const res = await fetch(
+              `${API_BASE_URL}/api/market/search?q=${encodeURIComponent(
+                query,
+              )}`,
+            );
+            if (!res.ok) return [lookupKey, null] as const;
+            const matches = (await res.json()) as AssetSearchResult[];
+            return [lookupKey, pickBestSearchMatch(ticker, exchange, matches)] as const;
+          } catch {
+            return [lookupKey, null] as const;
+          }
+        }),
+      );
+
+      const metadataByLookup = new Map(metadataEntries);
+
+      const holdings = normalizedRows.map((row) => {
+        const ticker = row.__ticker;
+        const exchange = row.__exchange;
+        const lookupKey = `${ticker}|${exchange}|${row.__isin}`;
+        const resolved = metadataByLookup.get(lookupKey);
+        const stock = MOCK_STOCKS.find((s) => s.ticker === ticker);
+
+        const resolvedTicker = resolved?.ticker?.toUpperCase() || ticker;
+        const csvIsin = row.__isin || row.ISIN?.trim();
+
         return {
           portfolio_id: portfolio.id,
-          ticker: (row.Ticker || "").toUpperCase(),
-          name: stock?.name || row.Ticker || "Unknown",
-          isin: stock?.isin || null,
-          purchase_date: row.Date,
-          purchase_price: parseFloat(row.Price) || 0,
-          quantity: parseFloat(row.Quantity) || 0,
-          fees: parseFloat(row.Fees) || 0,
+          ticker: resolvedTicker,
+          name: resolved?.name || stock?.name || row.Ticker || "Unknown",
+          asset_type: resolved?.assetType || null,
+          isin: csvIsin || stock?.isin || null,
+          purchase_date: row.__date,
+          purchase_price: row.__price,
+          quantity: row.__quantity,
+          fees: row.__fees,
         };
       });
 
@@ -135,7 +332,6 @@ export function CreateCsvModal({ open, onOpenChange, onCreated }: Props) {
                 <>
                   <Upload className="h-6 w-6 text-muted-foreground mb-2" />
                   <p className="text-sm text-muted-foreground">Drop a CSV or click to browse</p>
-                  <p className="text-xs text-muted-foreground mt-1">Format: Ticker, Date, Price, Quantity, Fees</p>
                 </>
               )}
               <input type="file" accept=".csv" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />

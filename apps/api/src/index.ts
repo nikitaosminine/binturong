@@ -59,6 +59,7 @@ interface YahooSearchResponse {
 interface YahooQuoteItem {
   currentPrice: number | null;
   change1dPercent: number | null;
+  sector: string | null;
 }
 
 interface YahooChartResponse {
@@ -78,33 +79,146 @@ interface YahooChartResponse {
   };
 }
 
+interface YahooQuoteResponse {
+  quoteResponse?: {
+    result?: Array<{
+      symbol?: string;
+      regularMarketPrice?: number | null;
+      regularMarketPreviousClose?: number | null;
+      regularMarketChangePercent?: number | null;
+    }>;
+  };
+}
+
+interface YahooQuoteSummaryResponse {
+  quoteSummary?: {
+    result?: Array<{
+      summaryProfile?: {
+        sector?: string;
+      };
+      assetProfile?: {
+        sector?: string;
+      };
+      fundProfile?: {
+        categoryName?: string;
+        fundFamily?: string;
+      };
+    }>;
+  };
+}
+
+function normalizeSectorLabel(value: string | null | undefined): string | null {
+  const cleaned = value?.trim();
+  if (!cleaned) return null;
+  if (cleaned.toLowerCase() === "n/a") return null;
+  return cleaned;
+}
+
+async function getSectorsForSymbols(symbols: string[]): Promise<Record<string, string>> {
+  const entries = await Promise.all(
+    symbols.map(async (symbol) => {
+      try {
+        const url = new URL(`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${symbol}`);
+        url.searchParams.set("modules", "summaryProfile,assetProfile,fundProfile");
+        const summary = await fetchJson<YahooQuoteSummaryResponse>(url.toString());
+        const profile = summary.quoteSummary?.result?.[0];
+        const sector =
+          normalizeSectorLabel(profile?.summaryProfile?.sector) ??
+          normalizeSectorLabel(profile?.assetProfile?.sector) ??
+          normalizeSectorLabel(profile?.fundProfile?.categoryName) ??
+          normalizeSectorLabel(profile?.fundProfile?.fundFamily);
+        if (!sector) return [symbol, "Other"] as const;
+        return [symbol, sector] as const;
+      } catch {
+        return [symbol, "Other"] as const;
+      }
+    }),
+  );
+
+  return Object.fromEntries(entries);
+}
+
+async function getQuotesFromBatch(symbols: string[]): Promise<Record<string, YahooQuoteItem>> {
+  if (symbols.length === 0) return {};
+
+  const url = new URL("https://query1.finance.yahoo.com/v7/finance/quote");
+  url.searchParams.set("symbols", symbols.join(","));
+
+  const data = await fetchJson<YahooQuoteResponse>(url.toString());
+  const rows = data.quoteResponse?.result ?? [];
+  const bySymbol = rows.reduce<Record<string, YahooQuoteItem>>((acc, row) => {
+    const symbol = row.symbol?.toUpperCase();
+    if (!symbol) return acc;
+
+    const currentPrice = row.regularMarketPrice ?? null;
+    const change1dPercent =
+      row.regularMarketChangePercent ??
+      (currentPrice != null &&
+      row.regularMarketPreviousClose != null &&
+      row.regularMarketPreviousClose !== 0
+        ? ((currentPrice - row.regularMarketPreviousClose) /
+          row.regularMarketPreviousClose) *
+          100
+        : null);
+
+    acc[symbol] = {
+      currentPrice,
+      change1dPercent,
+      sector: null,
+    };
+    return acc;
+  }, {});
+
+  return bySymbol;
+}
+
 async function getQuoteFromChart(symbol: string): Promise<YahooQuoteItem> {
   try {
     const url = new URL(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`);
     url.searchParams.set("interval", "1d");
-    url.searchParams.set("range", "1d");
+    url.searchParams.set("range", "5d");
 
     const chart = await fetchJson<YahooChartResponse>(url.toString());
     const series = chart.chart?.result?.[0];
-    const meta = series?.meta;
-    const closes = series?.indicators?.quote?.[0]?.close ?? [];
-    const latestClose = [...closes].reverse().find((value) => value != null) ?? null;
-    const currentPrice = meta?.regularMarketPrice ?? latestClose;
-    const previousClose = meta?.previousClose ?? null;
+    const closes = (series?.indicators?.quote?.[0]?.close ?? []).filter(
+      (value): value is number => value != null,
+    );
+    const latestClose = closes.at(-1) ?? null;
+    const previousClose = closes.length > 1 ? closes.at(-2)! : null;
     const change1dPercent =
-      currentPrice != null && previousClose != null && previousClose !== 0
-        ? ((currentPrice - previousClose) / previousClose) * 100
+      latestClose != null && previousClose != null && previousClose !== 0
+        ? ((latestClose - previousClose) / previousClose) * 100
         : null;
 
     return {
-      currentPrice,
+      currentPrice: latestClose,
       change1dPercent,
+      sector: null,
     };
   } catch {
     return {
       currentPrice: null,
       change1dPercent: null,
+      sector: null,
     };
+  }
+}
+
+async function getQuotesResilient(symbols: string[]): Promise<Record<string, YahooQuoteItem>> {
+  try {
+    const batch = await getQuotesFromBatch(symbols);
+    const missing = symbols.filter((symbol) => !batch[symbol]);
+    if (missing.length === 0) return batch;
+
+    const fallbackEntries = await Promise.all(
+      missing.map(async (symbol) => [symbol, await getQuoteFromChart(symbol)] as const),
+    );
+    return { ...batch, ...Object.fromEntries(fallbackEntries) };
+  } catch {
+    const fallbackEntries = await Promise.all(
+      symbols.map(async (symbol) => [symbol, await getQuoteFromChart(symbol)] as const),
+    );
+    return Object.fromEntries(fallbackEntries);
   }
 }
 
@@ -242,27 +356,30 @@ export default {
     if (method === "GET" && pathname === "/api/market/quotes") {
       const symbols = parseSymbols(url.searchParams.get("symbols"));
       if (symbols.length === 0) return json([]);
+      const [quotesBySymbol, ytdChanges, sectorsBySymbol] = await Promise.all([
+        getQuotesResilient(symbols),
+        Promise.all(symbols.map((symbol) => getYtdChangePercent(symbol))),
+        getSectorsForSymbols(symbols),
+      ]);
 
-      try {
-        const [quotes, ytdChanges] = await Promise.all([
-          Promise.all(symbols.map((symbol) => getQuoteFromChart(symbol))),
-          Promise.all(symbols.map((symbol) => getYtdChangePercent(symbol))),
-        ]);
+      const data = symbols.map((symbol, i) => {
+        const quote =
+          quotesBySymbol[symbol] ??
+          ({
+            currentPrice: null,
+            change1dPercent: null,
+            sector: null,
+          } satisfies YahooQuoteItem);
+        return {
+          ticker: symbol,
+          currentPrice: quote.currentPrice,
+          change1dPercent: quote.change1dPercent,
+          ytdChangePercent: ytdChanges[i],
+          sector: sectorsBySymbol[symbol] ?? quote.sector ?? "Other",
+        };
+      });
 
-        const data = symbols.map((symbol, i) => {
-          const quote = quotes[i];
-          return {
-            ticker: symbol,
-            currentPrice: quote.currentPrice,
-            change1dPercent: quote.change1dPercent,
-            ytdChangePercent: ytdChanges[i],
-          };
-        });
-
-        return json(data);
-      } catch (error) {
-        return json({ error: error instanceof Error ? error.message : "Quote lookup failed" }, 500);
-      }
+      return json(data);
     }
 
     const holdingMatch = pathname.match(/^\/api\/holdings\/([^/]+)$/);

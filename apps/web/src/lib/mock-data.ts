@@ -105,7 +105,7 @@ export function generateChartData(period: string, seed = 0) {
   return points;
 }
 
-export const CSV_TEMPLATE = `Ticker,Date,Price,Quantity,Fees
-AAPL,2024-01-15,185.50,10,4.99
-MSFT,2024-02-20,410.00,5,4.99
-GOOGL,2024-03-10,148.25,15,4.99`;
+export const CSV_TEMPLATE = `Ticker,Exchange,ISIN,Date,Price,Quantity,Fees
+AAPL,NMS,US0378331005,2024-01-15,185.50,10,4.99
+MSFT,NMS,US5949181045,2024-02-20,410.00,5,4.99
+GOOGL,NMS,US02079K3059,2024-03-10,148.25,15,4.99`;
