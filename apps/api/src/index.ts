@@ -59,6 +59,7 @@ interface YahooSearchResponse {
 interface YahooQuoteItem {
   currentPrice: number | null;
   change1dPercent: number | null;
+  sector: string | null;
 }
 
 interface YahooChartResponse {
@@ -78,34 +79,78 @@ interface YahooChartResponse {
   };
 }
 
-async function getQuoteFromChart(symbol: string): Promise<YahooQuoteItem> {
-  try {
-    const url = new URL(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`);
-    url.searchParams.set("interval", "1d");
-    url.searchParams.set("range", "1d");
+interface YahooQuoteResponse {
+  quoteResponse?: {
+    result?: Array<{
+      symbol?: string;
+      regularMarketPrice?: number | null;
+      regularMarketPreviousClose?: number | null;
+      regularMarketChangePercent?: number | null;
+    }>;
+  };
+}
 
-    const chart = await fetchJson<YahooChartResponse>(url.toString());
-    const series = chart.chart?.result?.[0];
-    const meta = series?.meta;
-    const closes = series?.indicators?.quote?.[0]?.close ?? [];
-    const latestClose = [...closes].reverse().find((value) => value != null) ?? null;
-    const currentPrice = meta?.regularMarketPrice ?? latestClose;
-    const previousClose = meta?.previousClose ?? null;
+interface YahooQuoteSummaryResponse {
+  quoteSummary?: {
+    result?: Array<{
+      assetProfile?: {
+        sector?: string;
+      };
+    }>;
+  };
+}
+
+async function getSectorsForSymbols(symbols: string[]): Promise<Record<string, string>> {
+  const entries = await Promise.all(
+    symbols.map(async (symbol) => {
+      try {
+        const url = new URL(`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${symbol}`);
+        url.searchParams.set("modules", "assetProfile");
+        const summary = await fetchJson<YahooQuoteSummaryResponse>(url.toString());
+        const sector = summary.quoteSummary?.result?.[0]?.assetProfile?.sector;
+        if (!sector) return [symbol, "Other"] as const;
+        return [symbol, sector] as const;
+      } catch {
+        return [symbol, "Other"] as const;
+      }
+    }),
+  );
+
+  return Object.fromEntries(entries);
+}
+
+async function getQuotesFromBatch(symbols: string[]): Promise<Record<string, YahooQuoteItem>> {
+  if (symbols.length === 0) return {};
+
+  const url = new URL("https://query1.finance.yahoo.com/v7/finance/quote");
+  url.searchParams.set("symbols", symbols.join(","));
+
+  const data = await fetchJson<YahooQuoteResponse>(url.toString());
+  const rows = data.quoteResponse?.result ?? [];
+  const bySymbol = rows.reduce<Record<string, YahooQuoteItem>>((acc, row) => {
+    const symbol = row.symbol?.toUpperCase();
+    if (!symbol) return acc;
+
+    const currentPrice = row.regularMarketPrice ?? null;
     const change1dPercent =
-      currentPrice != null && previousClose != null && previousClose !== 0
-        ? ((currentPrice - previousClose) / previousClose) * 100
-        : null;
+      row.regularMarketChangePercent ??
+      (currentPrice != null &&
+      row.regularMarketPreviousClose != null &&
+      row.regularMarketPreviousClose !== 0
+        ? ((currentPrice - row.regularMarketPreviousClose) /
+          row.regularMarketPreviousClose) *
+          100
+        : null);
 
-    return {
+    acc[symbol] = {
       currentPrice,
       change1dPercent,
+      sector: null,
     };
-  } catch {
-    return {
-      currentPrice: null,
-      change1dPercent: null,
-    };
-  }
+    return acc;
+  }, {});
+
+  return bySymbol;
 }
 
 async function getYtdChangePercent(symbol: string): Promise<number | null> {
@@ -244,18 +289,26 @@ export default {
       if (symbols.length === 0) return json([]);
 
       try {
-        const [quotes, ytdChanges] = await Promise.all([
-          Promise.all(symbols.map((symbol) => getQuoteFromChart(symbol))),
+        const [quotesBySymbol, ytdChanges, sectorsBySymbol] = await Promise.all([
+          getQuotesFromBatch(symbols),
           Promise.all(symbols.map((symbol) => getYtdChangePercent(symbol))),
+          getSectorsForSymbols(symbols),
         ]);
 
         const data = symbols.map((symbol, i) => {
-          const quote = quotes[i];
+          const quote =
+            quotesBySymbol[symbol] ??
+            ({
+              currentPrice: null,
+              change1dPercent: null,
+              sector: null,
+            } satisfies YahooQuoteItem);
           return {
             ticker: symbol,
             currentPrice: quote.currentPrice,
             change1dPercent: quote.change1dPercent,
             ytdChangePercent: ytdChanges[i],
+            sector: sectorsBySymbol[symbol] ?? quote.sector ?? "Other",
           };
         });
 

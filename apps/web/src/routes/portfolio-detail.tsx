@@ -236,6 +236,7 @@ interface LiveQuote {
   currentPrice: number | null;
   change1dPercent: number | null;
   ytdChangePercent: number | null;
+  sector?: string | null;
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? "https://binturong-api.nikita-osminine.workers.dev" : "http://localhost:8787");
@@ -365,7 +366,7 @@ export default function PortfolioDetailPage() {
         total,
         gl,
         weight,
-        sector: getSector(h.ticker),
+        sector: live?.sector || getSector(h.ticker),
         assetType: normalizeAssetType(h.asset_type),
         perf1D,
         perfYTD,
