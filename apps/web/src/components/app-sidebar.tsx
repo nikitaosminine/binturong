@@ -34,6 +34,7 @@ export function AppSidebar({ activeThesisCount = 0 }: AppSidebarProps) {
   const { state, setOpen, isMobile } = useSidebar();
   const collapsed = state === "collapsed";
   const collapseTimerRef = useRef<number | null>(null);
+  const [sidebarControlOpen, setSidebarControlOpen] = useState(false);
   const [sidebarMode, setSidebarMode] = useState<"expanded" | "collapsed" | "hover">(() => {
     try {
       const saved = localStorage.getItem("binturong.sidebar.mode");
@@ -92,6 +93,7 @@ export function AppSidebar({ activeThesisCount = 0 }: AppSidebarProps) {
 
   const handleHoverLeave = () => {
     if (isMobile || sidebarMode !== "hover") return;
+    if (sidebarControlOpen) return;
     if (collapseTimerRef.current != null) {
       window.clearTimeout(collapseTimerRef.current);
     }
@@ -100,6 +102,17 @@ export function AppSidebar({ activeThesisCount = 0 }: AppSidebarProps) {
       collapseTimerRef.current = null;
     }, 120);
   };
+
+  useEffect(() => {
+    if (isMobile || sidebarMode !== "hover") return;
+    if (sidebarControlOpen) {
+      if (collapseTimerRef.current != null) {
+        window.clearTimeout(collapseTimerRef.current);
+        collapseTimerRef.current = null;
+      }
+      setOpen(true);
+    }
+  }, [sidebarControlOpen, sidebarMode, isMobile, setOpen]);
 
   return (
     <Sidebar
@@ -181,7 +194,7 @@ export function AppSidebar({ activeThesisCount = 0 }: AppSidebarProps) {
       </SidebarContent>
 
       <SidebarFooter className="p-3 border-t border-border">
-        <DropdownMenu>
+        <DropdownMenu open={sidebarControlOpen} onOpenChange={setSidebarControlOpen}>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size={collapsed ? "icon" : "sm"} className="w-full justify-start mb-1">
               <PanelsTopLeft className="h-4 w-4" />
