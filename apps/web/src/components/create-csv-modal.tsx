@@ -9,6 +9,19 @@ import { MOCK_STOCKS, CSV_TEMPLATE } from "@/lib/mock-data";
 import Papa from "papaparse";
 import { toast } from "sonner";
 
+interface AssetSearchResult {
+  ticker: string;
+  name: string;
+  exchange: string;
+  assetType: string;
+}
+
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL ??
+  (import.meta.env.PROD
+    ? "https://binturong-api.nikita-osminine.workers.dev"
+    : "http://localhost:8787");
+
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -65,12 +78,45 @@ export function CreateCsvModal({ open, onOpenChange, onCreated }: Props) {
 
       if (pErr) throw pErr;
 
-      const holdings = (result.data as any[]).map((row) => {
-        const stock = MOCK_STOCKS.find((s) => s.ticker === row.Ticker?.toUpperCase());
+      const parsedRows = result.data as Array<Record<string, string>>;
+      const uniqueTickers = Array.from(
+        new Set(
+          parsedRows
+            .map((row) => (row.Ticker || "").toUpperCase().trim())
+            .filter(Boolean),
+        ),
+      );
+
+      const metadataEntries = await Promise.all(
+        uniqueTickers.map(async (ticker) => {
+          try {
+            const res = await fetch(
+              `${API_BASE_URL}/api/market/search?q=${encodeURIComponent(ticker)}`,
+            );
+            if (!res.ok) return [ticker, null] as const;
+            const matches = (await res.json()) as AssetSearchResult[];
+            const exactMatch =
+              matches.find((item) => item.ticker.toUpperCase() === ticker) ??
+              null;
+            return [ticker, exactMatch] as const;
+          } catch {
+            return [ticker, null] as const;
+          }
+        }),
+      );
+
+      const metadataByTicker = new Map(metadataEntries);
+
+      const holdings = parsedRows.map((row) => {
+        const ticker = (row.Ticker || "").toUpperCase().trim();
+        const resolved = metadataByTicker.get(ticker);
+        const stock = MOCK_STOCKS.find((s) => s.ticker === ticker);
+
         return {
           portfolio_id: portfolio.id,
-          ticker: (row.Ticker || "").toUpperCase(),
-          name: stock?.name || row.Ticker || "Unknown",
+          ticker,
+          name: resolved?.name || stock?.name || row.Ticker || "Unknown",
+          asset_type: resolved?.assetType || null,
           isin: stock?.isin || null,
           purchase_date: row.Date,
           purchase_price: parseFloat(row.Price) || 0,
