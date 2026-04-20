@@ -124,11 +124,14 @@ export default function ThesesPage() {
 
   return (
     <div className="w-full space-y-6">
-      <div className="flex items-center justify-end border-b border-border/50 pb-3">
-        <Button size="sm" onClick={() => openModal()}>
-          <Plus className="h-3.5 w-3.5 mr-1.5" />
-          New take
-        </Button>
+      <div className="grid grid-cols-1 border-b border-border/50 pb-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+        <div className="hidden xl:block" />
+        <div className="flex justify-end xl:justify-start">
+          <Button size="sm" onClick={() => openModal()}>
+            <Plus className="h-3.5 w-3.5 mr-1.5" />
+            New take
+          </Button>
+        </div>
       </div>
 
       <TakePageHeader />
