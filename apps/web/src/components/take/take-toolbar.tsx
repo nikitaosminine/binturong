@@ -25,13 +25,13 @@ export function TakeToolbar({
   onSearchChange,
 }: TakeToolbarProps) {
   return (
-    <div className="flex items-center gap-3">
-      <div className="flex flex-1 overflow-x-auto gap-1 bg-muted/40 rounded-lg p-0.5">
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-1 rounded-lg bg-muted/40 p-0.5">
         {tabs.map((tab) => (
           <button
             key={tab.value}
             onClick={() => onFilterChange(tab.value)}
-            className={`whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
               selectedFilter === tab.value
                 ? "bg-card text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground"
@@ -42,7 +42,7 @@ export function TakeToolbar({
         ))}
       </div>
 
-      <div className="relative min-w-[220px] max-w-xs w-full">
+      <div className="relative w-full">
         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
         <Input
           placeholder="Search theses…"
