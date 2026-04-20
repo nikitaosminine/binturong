@@ -122,11 +122,11 @@ export default function ThesesPage() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
+    <div className="w-full space-y-6">
       <TakePageHeader onNewTake={() => openModal()} />
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-10">
-        <section className="rounded-xl border border-border/50 bg-card p-4 lg:col-span-4">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+        <section className="rounded-xl border border-border/50 bg-card p-4">
           <TakeKpiSummary
             theses={theses}
             insights={insights}
@@ -162,7 +162,7 @@ export default function ThesesPage() {
           </div>
         </section>
 
-        <section className="rounded-xl border border-border/50 bg-card p-5 lg:col-span-6">
+        <section className="rounded-xl border border-border/50 bg-card p-5">
           <div className="mb-4 flex items-start justify-between">
             <div>
               <h2 className="flex items-center gap-2 text-lg font-semibold">
