@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BarChart3, Bell, BookOpen, LogOut, PanelsTopLeft, Settings } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -33,6 +33,7 @@ interface AppSidebarProps {
 export function AppSidebar({ activeThesisCount = 0 }: AppSidebarProps) {
   const { state, setOpen, isMobile } = useSidebar();
   const collapsed = state === "collapsed";
+  const collapseTimerRef = useRef<number | null>(null);
   const [sidebarMode, setSidebarMode] = useState<"expanded" | "collapsed" | "hover">(() => {
     try {
       const saved = localStorage.getItem("binturong.sidebar.mode");
@@ -72,15 +73,39 @@ export function AppSidebar({ activeThesisCount = 0 }: AppSidebarProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sidebarMode]);
 
+  useEffect(() => {
+    return () => {
+      if (collapseTimerRef.current != null) {
+        window.clearTimeout(collapseTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleHoverEnter = () => {
+    if (isMobile || sidebarMode !== "hover") return;
+    if (collapseTimerRef.current != null) {
+      window.clearTimeout(collapseTimerRef.current);
+      collapseTimerRef.current = null;
+    }
+    setOpen(true);
+  };
+
+  const handleHoverLeave = () => {
+    if (isMobile || sidebarMode !== "hover") return;
+    if (collapseTimerRef.current != null) {
+      window.clearTimeout(collapseTimerRef.current);
+    }
+    collapseTimerRef.current = window.setTimeout(() => {
+      setOpen(false);
+      collapseTimerRef.current = null;
+    }, 120);
+  };
+
   return (
     <Sidebar
       collapsible="icon"
-      onMouseEnter={() => {
-        if (!isMobile && sidebarMode === "hover") setOpen(true);
-      }}
-      onMouseLeave={() => {
-        if (!isMobile && sidebarMode === "hover") setOpen(false);
-      }}
+      onMouseEnter={handleHoverEnter}
+      onMouseLeave={handleHoverLeave}
     >
       <SidebarHeader className="p-0 border-b border-border">
         <div className="flex items-center gap-2.5 px-4 h-14">
