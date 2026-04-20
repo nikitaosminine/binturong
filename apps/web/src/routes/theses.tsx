@@ -1,8 +1,9 @@
 import { useMemo, useRef, useState } from "react";
-import { Sparkles, X } from "lucide-react";
+import { Plus, Sparkles, X } from "lucide-react";
 import { useOutletContext } from "react-router-dom";
 import { Thesis } from "@/lib/thesis";
 import { TakePageHeader } from "@/components/take/take-page-header";
+import { Button } from "@/components/ui/button";
 import { TakeToolbar, FilterTab } from "@/components/take/take-toolbar";
 import { TakeThesisCard } from "@/components/take/take-thesis-card";
 import { TakeInsightCard } from "@/components/take/take-insight-card";
@@ -123,7 +124,14 @@ export default function ThesesPage() {
 
   return (
     <div className="w-full space-y-6">
-      <TakePageHeader onNewTake={() => openModal()} />
+      <div className="flex items-center justify-end border-b border-border/50 pb-3">
+        <Button size="sm" onClick={() => openModal()}>
+          <Plus className="h-3.5 w-3.5 mr-1.5" />
+          New take
+        </Button>
+      </div>
+
+      <TakePageHeader />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         <section className="rounded-xl border border-border/50 bg-card p-4">
