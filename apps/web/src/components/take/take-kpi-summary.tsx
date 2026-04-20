@@ -89,8 +89,8 @@ export function TakeKpiSummary({ theses, insights, onJumpToAtRisk }: TakeKpiSumm
           ))}
 
           {watchNow.length > 0 && (
-            <span className="flex items-center gap-1 rounded bg-warning/15 px-1.5 py-0.5 text-warning">
-              <span className="h-1 w-1 rounded-full bg-warning" />
+            <span className="flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-400">
+              <span className="h-1 w-1 rounded-full bg-amber-400" />
               {watchNow.length} to watch
             </span>
           )}

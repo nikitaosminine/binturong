@@ -19,8 +19,8 @@ const INSIGHT_STYLES = {
     icon: <Eye className="h-3 w-3" />,
   },
   Watch: {
-    badge: "bg-warning/15 text-warning border-warning/40",
-    bar: "bg-warning",
+    badge: "bg-amber-500/15 text-amber-400 border-amber-500/40",
+    bar: "bg-amber-400",
     icon: <AlertTriangle className="h-3 w-3" />,
   },
 } as const;

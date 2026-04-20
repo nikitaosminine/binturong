@@ -167,7 +167,7 @@ export default function ThesesPage() {
             <div>
               <h2 className="flex items-center gap-2 text-lg font-semibold">
                 <Sparkles className="h-4 w-4 text-primary" />
-                Insights feed
+                Trace feed
               </h2>
               <p className="text-xs text-muted-foreground">
                 Signals mapped to your theses — review and act with context.
@@ -228,7 +228,7 @@ export default function ThesesPage() {
 
           <div
             ref={feedRef}
-            className="flex max-h-[calc(100vh-320px)] flex-col gap-3 overflow-y-auto pr-1"
+            className="take-scrollbar flex max-h-[calc(100vh-320px)] flex-col gap-3 overflow-y-auto pr-1"
           >
             {groupedInsights.length === 0 && (
               <div className="rounded-lg border border-dashed border-border/50 p-8 text-center text-xs text-muted-foreground">
