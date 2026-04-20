@@ -16,6 +16,19 @@ interface AssetSearchResult {
   assetType: string;
 }
 
+function pickBestSearchMatch(inputTicker: string, matches: AssetSearchResult[]) {
+  if (matches.length === 0) return null;
+
+  const normalized = inputTicker.trim().toUpperCase();
+  const exact = matches.find((item) => item.ticker.toUpperCase() === normalized);
+  if (exact) return exact;
+
+  const prefix = matches.find((item) => item.ticker.toUpperCase().startsWith(`${normalized}.`));
+  if (prefix) return prefix;
+
+  return matches[0];
+}
+
 const API_BASE_URL =
   import.meta.env.VITE_API_URL ??
   (import.meta.env.PROD
@@ -95,10 +108,7 @@ export function CreateCsvModal({ open, onOpenChange, onCreated }: Props) {
             );
             if (!res.ok) return [ticker, null] as const;
             const matches = (await res.json()) as AssetSearchResult[];
-            const exactMatch =
-              matches.find((item) => item.ticker.toUpperCase() === ticker) ??
-              null;
-            return [ticker, exactMatch] as const;
+            return [ticker, pickBestSearchMatch(ticker, matches)] as const;
           } catch {
             return [ticker, null] as const;
           }
@@ -112,9 +122,11 @@ export function CreateCsvModal({ open, onOpenChange, onCreated }: Props) {
         const resolved = metadataByTicker.get(ticker);
         const stock = MOCK_STOCKS.find((s) => s.ticker === ticker);
 
+        const resolvedTicker = resolved?.ticker?.toUpperCase() || ticker;
+
         return {
           portfolio_id: portfolio.id,
-          ticker,
+          ticker: resolvedTicker,
           name: resolved?.name || stock?.name || row.Ticker || "Unknown",
           asset_type: resolved?.assetType || null,
           isin: stock?.isin || null,
