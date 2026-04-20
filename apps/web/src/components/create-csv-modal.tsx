@@ -16,6 +16,82 @@ interface AssetSearchResult {
   assetType: string;
 }
 
+const EXCHANGE_ALIASES: Record<string, string> = {
+  EURONEXT: "PAR",
+  "EURONEXT PARIS": "PAR",
+  PARIS: "PAR",
+  XPAR: "PAR",
+  NYSE: "NYQ",
+  NASDAQ: "NMS",
+  NASDAQGS: "NMS",
+  XETRA: "GER",
+  SIX: "EBS",
+  LSE: "LSE",
+  LONDON: "LSE",
+  TSX: "TOR",
+  TSE: "TYO",
+  HKEX: "HKG",
+};
+
+function normalizeExchange(raw: string | undefined): string {
+  const normalized = raw?.trim().toUpperCase() || "";
+  if (!normalized) return "";
+  return EXCHANGE_ALIASES[normalized] ?? normalized;
+}
+
+function parseFlexibleNumber(raw: string | undefined): number {
+  const value = raw?.trim() || "";
+  if (!value) return 0;
+  const compact = value.replace(/\s+/g, "");
+  const lastComma = compact.lastIndexOf(",");
+  const lastDot = compact.lastIndexOf(".");
+
+  if (lastComma > -1 && lastDot > -1) {
+    const decimalSeparator = lastComma > lastDot ? "," : ".";
+    const thousandsSeparator = decimalSeparator === "," ? "." : ",";
+    const normalized = compact
+      .split(thousandsSeparator)
+      .join("")
+      .replace(decimalSeparator, ".");
+    return parseFloat(normalized) || 0;
+  }
+
+  if (lastComma > -1) {
+    const parts = compact.split(",");
+    if (parts.length === 2 && parts[1].length === 3 && parts[0].length >= 1) {
+      return parseFloat(parts.join("")) || 0;
+    }
+    const normalized = compact.replace(",", ".");
+    return parseFloat(normalized) || 0;
+  }
+
+  return parseFloat(compact) || 0;
+}
+
+function normalizeFlexibleDate(raw: string | undefined): string {
+  const value = raw?.trim() || "";
+  if (!value) throw new Error("Missing date");
+
+  const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return value;
+
+  const dmyOrMdy = value.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (dmyOrMdy) {
+    const first = Number(dmyOrMdy[1]);
+    const second = Number(dmyOrMdy[2]);
+    const year = Number(dmyOrMdy[3]);
+    if (first < 1 || first > 31 || second < 1 || second > 31) throw new Error("Invalid date");
+
+    const day = first > 12 ? first : second > 12 ? second : first;
+    const month = first > 12 ? second : second > 12 ? first : second;
+    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) throw new Error("Invalid date");
+  return `${parsed.getUTCFullYear()}-${String(parsed.getUTCMonth() + 1).padStart(2, "0")}-${String(parsed.getUTCDate()).padStart(2, "0")}`;
+}
+
 function pickBestSearchMatch(
   inputTicker: string,
   inputExchange: string | undefined,
@@ -106,12 +182,38 @@ export function CreateCsvModal({ open, onOpenChange, onCreated }: Props) {
       if (pErr) throw pErr;
 
       const parsedRows = result.data as Array<Record<string, string>>;
+      const normalizedRows = parsedRows.map((row, index) => {
+        const rowNum = index + 2;
+        const ticker = (row.Ticker || "").toUpperCase().trim();
+        const exchange = normalizeExchange(row.Exchange);
+        if (!ticker) throw new Error(`Missing ticker on CSV row ${rowNum}`);
+
+        try {
+          return {
+            ...row,
+            __row: rowNum,
+            __ticker: ticker,
+            __exchange: exchange,
+            __date: normalizeFlexibleDate(row.Date),
+            __price: parseFlexibleNumber(row.Price),
+            __quantity: parseFlexibleNumber(row.Quantity),
+            __fees: parseFlexibleNumber(row.Fees),
+          };
+        } catch (error) {
+          throw new Error(
+            error instanceof Error
+              ? `${error.message} on CSV row ${rowNum}`
+              : `Invalid data on CSV row ${rowNum}`,
+          );
+        }
+      });
+
       const uniquePairs = Array.from(
         new Set(
-          parsedRows
+          normalizedRows
             .map((row) => {
-              const ticker = (row.Ticker || "").toUpperCase().trim();
-              const exchange = (row.Exchange || "").toUpperCase().trim();
+              const ticker = row.__ticker;
+              const exchange = row.__exchange;
               return ticker ? `${ticker}|${exchange}` : "";
             })
             .filter(Boolean),
@@ -138,9 +240,9 @@ export function CreateCsvModal({ open, onOpenChange, onCreated }: Props) {
 
       const metadataByPair = new Map(metadataEntries);
 
-      const holdings = parsedRows.map((row) => {
-        const ticker = (row.Ticker || "").toUpperCase().trim();
-        const exchange = (row.Exchange || "").toUpperCase().trim();
+      const holdings = normalizedRows.map((row) => {
+        const ticker = row.__ticker;
+        const exchange = row.__exchange;
         const pairKey = `${ticker}|${exchange}`;
         const resolved = metadataByPair.get(pairKey);
         const stock = MOCK_STOCKS.find((s) => s.ticker === ticker);
@@ -154,10 +256,10 @@ export function CreateCsvModal({ open, onOpenChange, onCreated }: Props) {
           name: resolved?.name || stock?.name || row.Ticker || "Unknown",
           asset_type: resolved?.assetType || null,
           isin: csvIsin || stock?.isin || null,
-          purchase_date: row.Date,
-          purchase_price: parseFloat(row.Price) || 0,
-          quantity: parseFloat(row.Quantity) || 0,
-          fees: parseFloat(row.Fees) || 0,
+          purchase_date: row.__date,
+          purchase_price: row.__price,
+          quantity: row.__quantity,
+          fees: row.__fees,
         };
       });
 
@@ -218,7 +320,7 @@ export function CreateCsvModal({ open, onOpenChange, onCreated }: Props) {
                   <Upload className="h-6 w-6 text-muted-foreground mb-2" />
                   <p className="text-sm text-muted-foreground">Drop a CSV or click to browse</p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Format: Ticker, Exchange (optional), ISIN (optional), Date, Price, Quantity, Fees
+                    Format: Ticker, Exchange (optional), ISIN (optional), Date (YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY), Price/Quantity/Fees (dot or comma decimals)
                   </p>
                 </>
               )}
