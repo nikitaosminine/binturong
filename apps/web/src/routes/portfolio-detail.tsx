@@ -107,6 +107,42 @@ function normalizeAssetType(assetType: string | null) {
   return "Other";
 }
 
+function inferSectorFromHolding(
+  ticker: string,
+  name: string,
+  assetType: string | null,
+): string {
+  const symbol = ticker.toUpperCase();
+  const baseTicker = symbol.split(".")[0];
+  const label = name.toLowerCase();
+  const type = (assetType || "").toLowerCase();
+
+  const explicitTickerSector: Record<string, string> = {
+    "SU.PA": "Industrials",
+    "LR.PA": "Industrials",
+    "TTE.PA": "Energy",
+    "ALSEM.PA": "Technology",
+  };
+  if (explicitTickerSector[symbol]) return explicitTickerSector[symbol];
+  if (explicitTickerSector[baseTicker]) return explicitTickerSector[baseTicker];
+
+  if (type.includes("etf") || type.includes("fund")) {
+    if (label.includes("tech") || label.includes("nasdaq")) return "Technology";
+    if (label.includes("energy")) return "Energy";
+    if (label.includes("europe") || label.includes("msci") || label.includes("s&p"))
+      return "Broad Market";
+    return "ETF";
+  }
+
+  if (label.includes("electric") || label.includes("industrial")) return "Industrials";
+  if (label.includes("energy") || label.includes("totalenergies")) return "Energy";
+  if (label.includes("technology") || label.includes("tech")) return "Technology";
+  if (label.includes("bank") || label.includes("financial")) return "Financials";
+  if (label.includes("health")) return "Healthcare";
+
+  return "Other";
+}
+
 function AllocationSection({
   title,
   entries,
@@ -366,7 +402,10 @@ export default function PortfolioDetailPage() {
         total,
         gl,
         weight,
-        sector: live?.sector || getSector(h.ticker),
+        sector:
+          live?.sector && live.sector !== "Other"
+            ? live.sector
+            : inferSectorFromHolding(h.ticker, h.name, h.asset_type) || getSector(h.ticker),
         assetType: normalizeAssetType(h.asset_type),
         perf1D,
         perfYTD,
@@ -642,12 +681,14 @@ export default function PortfolioDetailPage() {
                   {visibleCols.map((key) => {
                     const w: Record<string, string> = {
                       name: "340px",
+                      assetType: "96px",
                       qty: "64px",
                       cur: "104px",
                       buy: "104px",
                       total: "104px",
                       gl: "112px",
                       weight: "78px",
+                      sector: "110px",
                       perf1D: "76px",
                       perfYTD: "76px",
                       take: "52px",
