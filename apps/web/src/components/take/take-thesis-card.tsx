@@ -1,5 +1,6 @@
-import { Paperclip } from "lucide-react";
+import { AlertTriangle, Paperclip, TrendingDown, TrendingUp } from "lucide-react";
 import { Thesis, ThesisConviction, ThesisStatus } from "@/lib/thesis";
+import { ThesisSignals } from "@/components/take/take-feed";
 
 const STATUS_LABELS: Record<ThesisStatus, string> = {
   active: "Active",
@@ -40,16 +41,28 @@ function ConvictionDots({ level }: { level: ThesisConviction }) {
 
 interface TakeThesisCardProps {
   thesis: Thesis;
+  signals: ThesisSignals;
+  selected: boolean;
+  highlighted: boolean;
   onOpen: () => void;
-  viewMode: "grid" | "list";
 }
 
-export function TakeThesisCard({ thesis, onOpen, viewMode }: TakeThesisCardProps) {
+export function TakeThesisCard({
+  thesis,
+  signals,
+  selected,
+  highlighted,
+  onOpen,
+}: TakeThesisCardProps) {
   return (
     <button
       onClick={onOpen}
-      className={`text-left rounded-lg border border-border/50 bg-card p-4 hover:border-border transition-colors space-y-3 cursor-pointer ${
-        viewMode === "list" ? "w-full" : ""
+      className={`text-left rounded-lg border p-4 transition-colors space-y-3 cursor-pointer ${
+        selected
+          ? "border-primary/50 bg-primary/5"
+          : highlighted
+            ? "border-primary/30 bg-card"
+            : "border-border/50 bg-card hover:border-border"
       }`}
     >
       <div className="flex items-start justify-between gap-2">
@@ -69,6 +82,35 @@ export function TakeThesisCard({ thesis, onOpen, viewMode }: TakeThesisCardProps
         <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{thesis.summary}</p>
       </div>
 
+      {signals.total > 0 && (
+        <div className="flex items-center gap-2 text-[10px]">
+          {signals.supportive > 0 && (
+            <span className="flex items-center gap-0.5 text-positive">
+              <TrendingUp className="h-2.5 w-2.5" />
+              {signals.supportive}
+            </span>
+          )}
+          {signals.atRisk > 0 && (
+            <span className="flex items-center gap-0.5 text-negative">
+              <TrendingDown className="h-2.5 w-2.5" />
+              {signals.atRisk}
+            </span>
+          )}
+          {signals.watch > 0 && (
+            <span className="flex items-center gap-0.5 text-warning">
+              <AlertTriangle className="h-2.5 w-2.5" />
+              {signals.watch}
+            </span>
+          )}
+          <span className="text-muted-foreground">· {signals.total} signals</span>
+          {signals.newCount > 0 && (
+            <span className="ml-auto rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
+              {signals.newCount} new
+            </span>
+          )}
+        </div>
+      )}
+
       <div className="flex items-center justify-between gap-3">
         <div className="flex flex-wrap gap-1">
           {thesis.tickers.map((ticker) => (
@@ -81,17 +123,12 @@ export function TakeThesisCard({ thesis, onOpen, viewMode }: TakeThesisCardProps
           ))}
         </div>
 
-        <div className="flex items-center gap-2">
-          {(thesis.attachments ?? []).length > 0 && (
-            <span className="inline-flex items-center gap-0.5 text-xs text-muted-foreground">
-              <Paperclip className="h-3 w-3" />
-              {thesis.attachments.length}
-            </span>
-          )}
-          {thesis.evidence.length > 0 && (
-            <span className="text-xs text-muted-foreground">{thesis.evidence.length} signals</span>
-          )}
-        </div>
+        {(thesis.attachments ?? []).length > 0 && (
+          <span className="inline-flex items-center gap-0.5 text-xs text-muted-foreground">
+            <Paperclip className="h-3 w-3" />
+            {thesis.attachments.length}
+          </span>
+        )}
       </div>
     </button>
   );
