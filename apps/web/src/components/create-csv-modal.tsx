@@ -16,6 +16,17 @@ interface AssetSearchResult {
   assetType: string;
 }
 
+interface ParsedCsvRow extends Record<string, string> {
+  __row: number;
+  __ticker: string;
+  __exchange: string;
+  __date: string;
+  __price: number;
+  __quantity: number;
+  __fees: number;
+  __isin: string;
+}
+
 const EXCHANGE_ALIASES: Record<string, string> = {
   EURONEXT: "PAR",
   "EURONEXT PARIS": "PAR",
@@ -182,10 +193,11 @@ export function CreateCsvModal({ open, onOpenChange, onCreated }: Props) {
       if (pErr) throw pErr;
 
       const parsedRows = result.data as Array<Record<string, string>>;
-      const normalizedRows = parsedRows.map((row, index) => {
+      const normalizedRows: ParsedCsvRow[] = parsedRows.map((row, index) => {
         const rowNum = index + 2;
         const ticker = (row.Ticker || "").toUpperCase().trim();
         const exchange = normalizeExchange(row.Exchange);
+        const isin = row.ISIN?.trim().toUpperCase() || "";
         if (!ticker) throw new Error(`Missing ticker on CSV row ${rowNum}`);
 
         try {
@@ -198,6 +210,7 @@ export function CreateCsvModal({ open, onOpenChange, onCreated }: Props) {
             __price: parseFlexibleNumber(row.Price),
             __quantity: parseFlexibleNumber(row.Quantity),
             __fees: parseFlexibleNumber(row.Fees),
+            __isin: isin,
           };
         } catch (error) {
           throw new Error(
@@ -208,47 +221,47 @@ export function CreateCsvModal({ open, onOpenChange, onCreated }: Props) {
         }
       });
 
-      const uniquePairs = Array.from(
+      const uniqueLookups = Array.from(
         new Set(
           normalizedRows
             .map((row) => {
-              const ticker = row.__ticker;
-              const exchange = row.__exchange;
-              return ticker ? `${ticker}|${exchange}` : "";
+              if (!row.__ticker) return "";
+              return `${row.__ticker}|${row.__exchange}|${row.__isin}`;
             })
             .filter(Boolean),
         ),
       );
 
       const metadataEntries = await Promise.all(
-        uniquePairs.map(async (pairKey) => {
-          const [ticker, exchange] = pairKey.split("|");
+        uniqueLookups.map(async (lookupKey) => {
+          const [ticker, exchange, isin] = lookupKey.split("|");
+          const query = isin || (exchange ? `${ticker} ${exchange}` : ticker);
           try {
             const res = await fetch(
               `${API_BASE_URL}/api/market/search?q=${encodeURIComponent(
-                exchange ? `${ticker} ${exchange}` : ticker,
+                query,
               )}`,
             );
-            if (!res.ok) return [pairKey, null] as const;
+            if (!res.ok) return [lookupKey, null] as const;
             const matches = (await res.json()) as AssetSearchResult[];
-            return [pairKey, pickBestSearchMatch(ticker, exchange, matches)] as const;
+            return [lookupKey, pickBestSearchMatch(ticker, exchange, matches)] as const;
           } catch {
-            return [pairKey, null] as const;
+            return [lookupKey, null] as const;
           }
         }),
       );
 
-      const metadataByPair = new Map(metadataEntries);
+      const metadataByLookup = new Map(metadataEntries);
 
       const holdings = normalizedRows.map((row) => {
         const ticker = row.__ticker;
         const exchange = row.__exchange;
-        const pairKey = `${ticker}|${exchange}`;
-        const resolved = metadataByPair.get(pairKey);
+        const lookupKey = `${ticker}|${exchange}|${row.__isin}`;
+        const resolved = metadataByLookup.get(lookupKey);
         const stock = MOCK_STOCKS.find((s) => s.ticker === ticker);
 
         const resolvedTicker = resolved?.ticker?.toUpperCase() || ticker;
-        const csvIsin = row.ISIN?.trim();
+        const csvIsin = row.__isin || row.ISIN?.trim();
 
         return {
           portfolio_id: portfolio.id,
@@ -319,9 +332,6 @@ export function CreateCsvModal({ open, onOpenChange, onCreated }: Props) {
                 <>
                   <Upload className="h-6 w-6 text-muted-foreground mb-2" />
                   <p className="text-sm text-muted-foreground">Drop a CSV or click to browse</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Format: Ticker, Exchange (optional), ISIN (optional), Date (YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY), Price/Quantity/Fees (dot or comma decimals)
-                  </p>
                 </>
               )}
               <input type="file" accept=".csv" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />

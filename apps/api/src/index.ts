@@ -153,6 +153,56 @@ async function getQuotesFromBatch(symbols: string[]): Promise<Record<string, Yah
   return bySymbol;
 }
 
+async function getQuoteFromChart(symbol: string): Promise<YahooQuoteItem> {
+  try {
+    const url = new URL(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`);
+    url.searchParams.set("interval", "1d");
+    url.searchParams.set("range", "5d");
+
+    const chart = await fetchJson<YahooChartResponse>(url.toString());
+    const series = chart.chart?.result?.[0];
+    const closes = (series?.indicators?.quote?.[0]?.close ?? []).filter(
+      (value): value is number => value != null,
+    );
+    const latestClose = closes.at(-1) ?? null;
+    const previousClose = closes.length > 1 ? closes.at(-2)! : null;
+    const change1dPercent =
+      latestClose != null && previousClose != null && previousClose !== 0
+        ? ((latestClose - previousClose) / previousClose) * 100
+        : null;
+
+    return {
+      currentPrice: latestClose,
+      change1dPercent,
+      sector: null,
+    };
+  } catch {
+    return {
+      currentPrice: null,
+      change1dPercent: null,
+      sector: null,
+    };
+  }
+}
+
+async function getQuotesResilient(symbols: string[]): Promise<Record<string, YahooQuoteItem>> {
+  try {
+    const batch = await getQuotesFromBatch(symbols);
+    const missing = symbols.filter((symbol) => !batch[symbol]);
+    if (missing.length === 0) return batch;
+
+    const fallbackEntries = await Promise.all(
+      missing.map(async (symbol) => [symbol, await getQuoteFromChart(symbol)] as const),
+    );
+    return { ...batch, ...Object.fromEntries(fallbackEntries) };
+  } catch {
+    const fallbackEntries = await Promise.all(
+      symbols.map(async (symbol) => [symbol, await getQuoteFromChart(symbol)] as const),
+    );
+    return Object.fromEntries(fallbackEntries);
+  }
+}
+
 async function getYtdChangePercent(symbol: string): Promise<number | null> {
   try {
     const now = new Date();
@@ -287,35 +337,30 @@ export default {
     if (method === "GET" && pathname === "/api/market/quotes") {
       const symbols = parseSymbols(url.searchParams.get("symbols"));
       if (symbols.length === 0) return json([]);
+      const [quotesBySymbol, ytdChanges, sectorsBySymbol] = await Promise.all([
+        getQuotesResilient(symbols),
+        Promise.all(symbols.map((symbol) => getYtdChangePercent(symbol))),
+        getSectorsForSymbols(symbols),
+      ]);
 
-      try {
-        const [quotesBySymbol, ytdChanges, sectorsBySymbol] = await Promise.all([
-          getQuotesFromBatch(symbols),
-          Promise.all(symbols.map((symbol) => getYtdChangePercent(symbol))),
-          getSectorsForSymbols(symbols),
-        ]);
+      const data = symbols.map((symbol, i) => {
+        const quote =
+          quotesBySymbol[symbol] ??
+          ({
+            currentPrice: null,
+            change1dPercent: null,
+            sector: null,
+          } satisfies YahooQuoteItem);
+        return {
+          ticker: symbol,
+          currentPrice: quote.currentPrice,
+          change1dPercent: quote.change1dPercent,
+          ytdChangePercent: ytdChanges[i],
+          sector: sectorsBySymbol[symbol] ?? quote.sector ?? "Other",
+        };
+      });
 
-        const data = symbols.map((symbol, i) => {
-          const quote =
-            quotesBySymbol[symbol] ??
-            ({
-              currentPrice: null,
-              change1dPercent: null,
-              sector: null,
-            } satisfies YahooQuoteItem);
-          return {
-            ticker: symbol,
-            currentPrice: quote.currentPrice,
-            change1dPercent: quote.change1dPercent,
-            ytdChangePercent: ytdChanges[i],
-            sector: sectorsBySymbol[symbol] ?? quote.sector ?? "Other",
-          };
-        });
-
-        return json(data);
-      } catch (error) {
-        return json({ error: error instanceof Error ? error.message : "Quote lookup failed" }, 500);
-      }
+      return json(data);
     }
 
     const holdingMatch = pathname.match(/^\/api\/holdings\/([^/]+)$/);
