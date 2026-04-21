@@ -124,6 +124,17 @@ interface AgentRunQueueMessage {
   triggerType: AgentRunTriggerType;
 }
 
+type AgentToolName = "portfolio_context" | "market_quotes";
+
+interface AgentToolCall {
+  tool: AgentToolName;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  inputSummary: Record<string, unknown>;
+  outputSummary: Record<string, unknown>;
+}
+
 interface AgentRunRow {
   id: string;
   user_id: string;
@@ -141,6 +152,41 @@ interface AgentRunRow {
   finished_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+interface PortfolioContextResult {
+  portfolioId: string;
+  holdings: Array<{
+    ticker: string;
+    name: string;
+    quantity: number;
+  }>;
+  theses: Array<{
+    id: string;
+    title: string;
+    tickers: string[];
+    status: string;
+  }>;
+}
+
+interface MarketQuotesResult {
+  tickers: string[];
+  quotes: Array<{
+    ticker: string;
+    currentPrice: number | null;
+    change1dPercent: number | null;
+    ytdChangePercent: number | null;
+    sector: string;
+  }>;
+}
+
+interface GuardrailState {
+  startedMs: number;
+  totalCalls: number;
+  callsByTool: Record<AgentToolName, number>;
+  maxTotalCalls: number;
+  perToolLimit: number;
+  maxDurationMs: number;
 }
 
 function normalizeSectorLabel(value: string | null | undefined): string | null {
@@ -366,6 +412,142 @@ async function listUserPortfolioIds(env: Env, userId: string): Promise<string[]>
     .eq("user_id", userId);
   if (error) throw new Error(error.message);
   return (data ?? []).map((row) => row.id as string);
+}
+
+async function runPortfolioContextTool(
+  env: Env,
+  input: { userId: string; portfolioId: string },
+): Promise<PortfolioContextResult> {
+  const client = db(env);
+  const [{ data: holdings, error: holdingsError }, { data: theses, error: thesesError }] =
+    await Promise.all([
+      client
+        .from("holdings")
+        .select("ticker,name,quantity")
+        .eq("portfolio_id", input.portfolioId)
+        .order("ticker", { ascending: true }),
+      client
+        .from("theses")
+        .select("id,title,tickers,status")
+        .eq("user_id", input.userId)
+        .order("created_at", { ascending: false })
+        .limit(100),
+    ]);
+
+  if (holdingsError) throw new Error(`portfolio_context holdings error: ${holdingsError.message}`);
+  if (thesesError) throw new Error(`portfolio_context theses error: ${thesesError.message}`);
+
+  const portfolioTickers = new Set((holdings ?? []).map((row) => String(row.ticker).toUpperCase()));
+  const filteredTheses = (theses ?? []).filter((row) =>
+    (row.tickers ?? []).some((ticker: string) => portfolioTickers.has(String(ticker).toUpperCase())),
+  );
+
+  return {
+    portfolioId: input.portfolioId,
+    holdings: (holdings ?? []).map((row) => ({
+      ticker: String(row.ticker).toUpperCase(),
+      name: String(row.name ?? row.ticker),
+      quantity: Number(row.quantity ?? 0),
+    })),
+    theses: filteredTheses.map((row) => ({
+      id: String(row.id),
+      title: String(row.title),
+      tickers: (row.tickers ?? []).map((ticker: string) => String(ticker).toUpperCase()),
+      status: String(row.status),
+    })),
+  };
+}
+
+async function runMarketQuotesTool(input: { tickers: string[] }): Promise<MarketQuotesResult> {
+  const dedupedTickers = Array.from(new Set(input.tickers.map((ticker) => ticker.toUpperCase()))).slice(0, 30);
+  if (dedupedTickers.length === 0) {
+    return { tickers: [], quotes: [] };
+  }
+
+  const [quotesBySymbol, ytdChanges, sectorsBySymbol] = await Promise.all([
+    getQuotesResilient(dedupedTickers),
+    Promise.all(dedupedTickers.map((symbol) => getYtdChangePercent(symbol))),
+    getSectorsForSymbols(dedupedTickers),
+  ]);
+
+  return {
+    tickers: dedupedTickers,
+    quotes: dedupedTickers.map((ticker, index) => {
+      const quote = quotesBySymbol[ticker];
+      return {
+        ticker,
+        currentPrice: quote?.currentPrice ?? null,
+        change1dPercent: quote?.change1dPercent ?? null,
+        ytdChangePercent: ytdChanges[index] ?? null,
+        sector: sectorsBySymbol[ticker] ?? quote?.sector ?? "Other",
+      };
+    }),
+  };
+}
+
+function createGuardrailState(): GuardrailState {
+  return {
+    startedMs: Date.now(),
+    totalCalls: 0,
+    callsByTool: {
+      portfolio_context: 0,
+      market_quotes: 0,
+    },
+    maxTotalCalls: 8,
+    perToolLimit: 4,
+    maxDurationMs: 45_000,
+  };
+}
+
+function assertGuardrails(state: GuardrailState, tool: AgentToolName): void {
+  if (Date.now() - state.startedMs > state.maxDurationMs) {
+    throw new Error("Guardrail: run exceeded max duration");
+  }
+  if (state.totalCalls >= state.maxTotalCalls) {
+    throw new Error("Guardrail: max tool calls exceeded");
+  }
+  if (state.callsByTool[tool] >= state.perToolLimit) {
+    throw new Error(`Guardrail: per-tool call limit exceeded for ${tool}`);
+  }
+}
+
+async function runToolWithGuardrails<TInput, TOutput>(
+  state: GuardrailState,
+  callLog: AgentToolCall[],
+  tool: AgentToolName,
+  input: TInput,
+  runner: (input: TInput) => Promise<TOutput>,
+): Promise<TOutput> {
+  assertGuardrails(state, tool);
+  state.totalCalls += 1;
+  state.callsByTool[tool] += 1;
+
+  const startedAt = new Date().toISOString();
+  const startMs = Date.now();
+  const output = await runner(input);
+  const finishedAt = new Date().toISOString();
+  const durationMs = Date.now() - startMs;
+
+  callLog.push({
+    tool,
+    startedAt,
+    finishedAt,
+    durationMs,
+    inputSummary: {
+      keys: Object.keys((input ?? {}) as Record<string, unknown>),
+    },
+    outputSummary:
+      tool === "portfolio_context"
+        ? {
+            holdings: (output as PortfolioContextResult).holdings.length,
+            theses: (output as PortfolioContextResult).theses.length,
+          }
+        : {
+            quotes: (output as MarketQuotesResult).quotes.length,
+          },
+  });
+
+  return output;
 }
 
 export default {
@@ -624,6 +806,8 @@ export default {
     for (const message of batch.messages) {
       const runId = message.body.runId;
       try {
+        const guardrails = createGuardrailState();
+        const toolCalls: AgentToolCall[] = [];
         const start = new Date().toISOString();
         await db(env)
           .from("agent_runs")
@@ -631,14 +815,59 @@ export default {
           .eq("id", runId)
           .eq("status", "queued");
 
+        const context = await runToolWithGuardrails(
+          guardrails,
+          toolCalls,
+          "portfolio_context",
+          {
+            userId: message.body.userId,
+            portfolioId: message.body.portfolioId,
+          },
+          (input) => runPortfolioContextTool(env, input),
+        );
+
+        const contextTickers = Array.from(
+          new Set([
+            ...context.holdings.map((holding) => holding.ticker),
+            ...context.theses.flatMap((thesis) => thesis.tickers),
+          ]),
+        );
+
+        const quotes = await runToolWithGuardrails(
+          guardrails,
+          toolCalls,
+          "market_quotes",
+          {
+            tickers: contextTickers,
+          },
+          (input) => runMarketQuotesTool(input),
+        );
+
         await db(env)
           .from("agent_runs")
           .update({
             status: "completed",
             finished_at: new Date().toISOString(),
             token_usage: {
-              phase: "phase2_queue_only",
+              phase: "phase3_tooling_v1",
               processed_by: "cloudflare_queue_consumer",
+              guardrails: {
+                maxTotalCalls: guardrails.maxTotalCalls,
+                perToolLimit: guardrails.perToolLimit,
+                maxDurationMs: guardrails.maxDurationMs,
+                callsByTool: guardrails.callsByTool,
+                totalCalls: guardrails.totalCalls,
+                durationMs: Date.now() - guardrails.startedMs,
+              },
+              context: {
+                holdings: context.holdings.length,
+                theses: context.theses.length,
+                tickers: contextTickers.length,
+              },
+              quotes: {
+                count: quotes.quotes.length,
+              },
+              tool_calls: toolCalls,
             },
           })
           .eq("id", runId)
