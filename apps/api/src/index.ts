@@ -4,6 +4,7 @@ export interface Env {
   SUPABASE_URL: string;
   SUPABASE_SERVICE_KEY: string;
   SUPABASE_ANON_KEY: string;
+  AGENT_RUNS_QUEUE: Queue<AgentRunQueueMessage>;
 }
 
 const CORS_HEADERS = {
@@ -105,6 +106,41 @@ interface YahooQuoteSummaryResponse {
       };
     }>;
   };
+}
+
+type AgentRunTriggerType = "scheduled" | "ondemand";
+type AgentRunStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "failed_validation";
+
+interface AgentRunQueueMessage {
+  runId: string;
+  userId: string;
+  portfolioId: string;
+  triggerType: AgentRunTriggerType;
+}
+
+interface AgentRunRow {
+  id: string;
+  user_id: string;
+  portfolio_id: string | null;
+  trigger_type: AgentRunTriggerType;
+  status: AgentRunStatus;
+  idempotency_key: string;
+  scope_hash: string;
+  model_main: string | null;
+  model_sub: string | null;
+  token_usage: Record<string, unknown>;
+  error_code: string | null;
+  error_detail: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 function normalizeSectorLabel(value: string | null | undefined): string | null {
@@ -246,6 +282,90 @@ async function getYtdChangePercent(symbol: string): Promise<number | null> {
   } catch {
     return null;
   }
+}
+
+function buildIdempotencyKey(input: {
+  userId: string;
+  portfolioId: string;
+  triggerType: AgentRunTriggerType;
+  now: Date;
+}): string {
+  const window = `${input.now.getUTCFullYear()}-${String(input.now.getUTCMonth() + 1).padStart(2, "0")}-${String(input.now.getUTCDate()).padStart(2, "0")}`;
+  return `${input.userId}:${input.portfolioId}:${input.triggerType}:${window}`;
+}
+
+async function createRun(
+  env: Env,
+  params: {
+    userId: string;
+    portfolioId: string;
+    triggerType: AgentRunTriggerType;
+    idempotencyKey?: string;
+  },
+): Promise<AgentRunRow> {
+  const now = new Date();
+  const idempotencyKey =
+    params.idempotencyKey ??
+    buildIdempotencyKey({
+      userId: params.userId,
+      portfolioId: params.portfolioId,
+      triggerType: params.triggerType,
+      now,
+    });
+
+  const payload = {
+    user_id: params.userId,
+    portfolio_id: params.portfolioId,
+    trigger_type: params.triggerType,
+    status: "queued" as const,
+    idempotency_key: idempotencyKey,
+    scope_hash: params.portfolioId,
+    model_main: "grok-4.20-0309-reasoning",
+    model_sub: "grok-4-1-fast-reasoning",
+  };
+
+  const client = db(env);
+  const { data: inserted, error: insertError } = await client
+    .from("agent_runs")
+    .insert(payload)
+    .select("*")
+    .single();
+
+  if (insertError) {
+    if (insertError.code === "23505") {
+      const { data: existing, error: existingError } = await client
+        .from("agent_runs")
+        .select("*")
+        .eq("idempotency_key", idempotencyKey)
+        .single();
+      if (existingError || !existing) {
+        throw new Error(existingError?.message || "Failed to load existing run");
+      }
+      return existing as AgentRunRow;
+    }
+
+    throw new Error(insertError.message);
+  }
+
+  return inserted as AgentRunRow;
+}
+
+async function queueRun(env: Env, run: AgentRunRow): Promise<void> {
+  await env.AGENT_RUNS_QUEUE.send({
+    runId: run.id,
+    userId: run.user_id,
+    portfolioId: run.portfolio_id ?? "",
+    triggerType: run.trigger_type,
+  });
+}
+
+async function listUserPortfolioIds(env: Env, userId: string): Promise<string[]> {
+  const { data, error } = await db(env)
+    .from("portfolios")
+    .select("id")
+    .eq("user_id", userId);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => row.id as string);
 }
 
 export default {
@@ -398,6 +518,132 @@ export default {
       }
     }
 
+    // Agent runs
+    if (pathname === "/api/agent/runs") {
+      if (method === "GET") {
+        const userId = url.searchParams.get("user_id");
+        if (!userId) return json({ error: "user_id is required" }, 400);
+
+        const portfolioId = url.searchParams.get("portfolio_id");
+        let query = db(env)
+          .from("agent_runs")
+          .select("*")
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false })
+          .limit(100);
+
+        if (portfolioId) query = query.eq("portfolio_id", portfolioId);
+        const { data, error } = await query;
+        if (error) return json({ error: error.message }, 500);
+        return json(data);
+      }
+
+      if (method === "POST") {
+        const body = (await request.json()) as {
+          userId?: string;
+          portfolioId?: string;
+          triggerType?: AgentRunTriggerType;
+          allPortfolios?: boolean;
+        };
+
+        if (!body.userId) return json({ error: "userId is required" }, 400);
+        const triggerType = body.triggerType ?? "ondemand";
+        if (!["scheduled", "ondemand"].includes(triggerType)) {
+          return json({ error: "triggerType must be scheduled or ondemand" }, 400);
+        }
+
+        const portfolioIds = body.allPortfolios
+          ? await listUserPortfolioIds(env, body.userId)
+          : body.portfolioId
+            ? [body.portfolioId]
+            : [];
+
+        if (portfolioIds.length === 0) {
+          return json({ error: "No target portfolios found" }, 400);
+        }
+
+        const runs: AgentRunRow[] = [];
+        for (const portfolioId of portfolioIds) {
+          const run = await createRun(env, {
+            userId: body.userId,
+            portfolioId,
+            triggerType,
+          });
+          runs.push(run);
+        }
+
+        await Promise.all(runs.map((run) => queueRun(env, run)));
+        return json(
+          {
+            queued: runs.length,
+            runs: runs.map((run) => ({
+              id: run.id,
+              portfolioId: run.portfolio_id,
+              status: run.status,
+              createdAt: run.created_at,
+            })),
+          },
+          201,
+        );
+      }
+    }
+
+    const cancelRunMatch = pathname.match(/^\/api\/agent\/runs\/([^/]+)\/cancel$/);
+    if (cancelRunMatch && method === "POST") {
+      const runId = cancelRunMatch[1];
+      const { data, error } = await db(env)
+        .from("agent_runs")
+        .update({
+          status: "cancelled",
+          finished_at: new Date().toISOString(),
+        })
+        .eq("id", runId)
+        .in("status", ["queued", "running"])
+        .select("*")
+        .single();
+      if (error) return json({ error: error.message }, 500);
+      return json(data);
+    }
+
     return json({ error: "Not found" }, 404);
   },
-} satisfies ExportedHandler<Env>;
+  async queue(batch: MessageBatch<AgentRunQueueMessage>, env: Env): Promise<void> {
+    for (const message of batch.messages) {
+      const runId = message.body.runId;
+      try {
+        const start = new Date().toISOString();
+        await db(env)
+          .from("agent_runs")
+          .update({ status: "running", started_at: start })
+          .eq("id", runId)
+          .eq("status", "queued");
+
+        await db(env)
+          .from("agent_runs")
+          .update({
+            status: "completed",
+            finished_at: new Date().toISOString(),
+            token_usage: {
+              phase: "phase2_queue_only",
+              processed_by: "cloudflare_queue_consumer",
+            },
+          })
+          .eq("id", runId)
+          .neq("status", "cancelled");
+
+        message.ack();
+      } catch (error) {
+        await db(env)
+          .from("agent_runs")
+          .update({
+            status: "failed",
+            finished_at: new Date().toISOString(),
+            error_code: "QUEUE_PROCESSING_ERROR",
+            error_detail: error instanceof Error ? error.message : "Unknown queue processing error",
+          })
+          .eq("id", runId);
+        message.retry();
+      }
+    }
+  },
+} satisfies ExportedHandler<Env, AgentRunQueueMessage>;
