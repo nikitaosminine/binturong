@@ -404,7 +404,8 @@ function buildIdempotencyKey(input: {
 }): string {
   const dayWindow = `${input.now.getUTCFullYear()}-${String(input.now.getUTCMonth() + 1).padStart(2, "0")}-${String(input.now.getUTCDate()).padStart(2, "0")}`;
   if (input.triggerType === "scheduled") {
-    return `${input.userId}:${input.portfolioId}:${input.triggerType}:${dayWindow}`;
+    const hourWindow = String(input.now.getUTCHours()).padStart(2, "0");
+    return `${input.userId}:${input.portfolioId}:${input.triggerType}:${dayWindow}T${hourWindow}`;
   }
 
   const minuteWindow = `${dayWindow}T${String(input.now.getUTCHours()).padStart(2, "0")}:${String(input.now.getUTCMinutes()).padStart(2, "0")}`;
@@ -483,6 +484,126 @@ async function listUserPortfolioIds(env: Env, userId: string): Promise<string[]>
     .eq("user_id", userId);
   if (error) throw new Error(error.message);
   return (data ?? []).map((row) => row.id as string);
+}
+
+function runsPerDayToLocalHours(runsPerDay: number): number[] {
+  if (runsPerDay <= 1) return [8];
+  if (runsPerDay === 2) return [8, 20];
+  return [6, 14, 22];
+}
+
+function getHourInTimezone(now: Date, timezone: string): number {
+  const hour = new Intl.DateTimeFormat("en-GB", {
+    timeZone: timezone,
+    hour: "2-digit",
+    hourCycle: "h23",
+  }).format(now);
+  const parsed = Number.parseInt(hour, 10);
+  if (Number.isNaN(parsed)) return now.getUTCHours();
+  return parsed;
+}
+
+async function runScheduledFanout(
+  env: Env,
+  options: { now: Date; dryRun?: boolean; source: "cron" | "manual" },
+): Promise<{
+  source: "cron" | "manual";
+  dryRun: boolean;
+  checkedPortfolios: number;
+  duePortfolios: number;
+  queuedRuns: number;
+  queuedRunIds: string[];
+}> {
+  if (!env.AGENT_RUNS_QUEUE && !options.dryRun) {
+    throw new Error("Server misconfiguration: AGENT_RUNS_QUEUE binding is missing");
+  }
+
+  const client = db(env);
+  const [{ data: portfolios, error: portfoliosError }, { data: userSettings, error: userSettingsError }, { data: portfolioSettings, error: portfolioSettingsError }] =
+    await Promise.all([
+      client.from("portfolios").select("id,user_id"),
+      client.from("agent_user_settings").select("user_id,timezone,global_runs_per_day"),
+      client
+        .from("agent_portfolio_settings")
+        .select("portfolio_id,user_id,runs_per_day_override,agent_enabled"),
+    ]);
+
+  if (portfoliosError) throw new Error(`scheduled fanout portfolios error: ${portfoliosError.message}`);
+  if (userSettingsError) {
+    throw new Error(`scheduled fanout agent_user_settings error: ${userSettingsError.message}`);
+  }
+  if (portfolioSettingsError) {
+    throw new Error(`scheduled fanout agent_portfolio_settings error: ${portfolioSettingsError.message}`);
+  }
+
+  const userSettingsByUserId = new Map(
+    (userSettings ?? []).map((row) => [
+      String(row.user_id),
+      {
+        timezone: String(row.timezone ?? "Europe/Paris"),
+        globalRunsPerDay: Number(row.global_runs_per_day ?? 2),
+      },
+    ]),
+  );
+  const portfolioSettingsByPortfolioId = new Map(
+    (portfolioSettings ?? []).map((row) => [
+      String(row.portfolio_id),
+      {
+        userId: String(row.user_id),
+        runsPerDayOverride:
+          row.runs_per_day_override == null ? null : Number(row.runs_per_day_override),
+        agentEnabled: row.agent_enabled == null ? true : Boolean(row.agent_enabled),
+      },
+    ]),
+  );
+
+  const dueTargets = (portfolios ?? []).filter((portfolio) => {
+    const portfolioId = String(portfolio.id);
+    const userId = String(portfolio.user_id);
+    const userSetting = userSettingsByUserId.get(userId);
+    const portfolioSetting = portfolioSettingsByPortfolioId.get(portfolioId);
+
+    if (portfolioSetting && !portfolioSetting.agentEnabled) return false;
+
+    const timezone = userSetting?.timezone ?? "Europe/Paris";
+    const runsPerDay = Math.max(
+      1,
+      Math.min(3, portfolioSetting?.runsPerDayOverride ?? userSetting?.globalRunsPerDay ?? 2),
+    );
+    const localHour = getHourInTimezone(options.now, timezone);
+    return runsPerDayToLocalHours(runsPerDay).includes(localHour);
+  });
+
+  if (options.dryRun) {
+    return {
+      source: options.source,
+      dryRun: true,
+      checkedPortfolios: (portfolios ?? []).length,
+      duePortfolios: dueTargets.length,
+      queuedRuns: 0,
+      queuedRunIds: [],
+    };
+  }
+
+  const queuedRunIds: string[] = [];
+  for (const target of dueTargets) {
+    const run = await createRun(env, {
+      userId: String(target.user_id),
+      portfolioId: String(target.id),
+      triggerType: "scheduled",
+    });
+    await queueRun(env, run);
+    queuedRunIds.push(run.id);
+  }
+
+  return {
+    source: options.source,
+    dryRun: false,
+    checkedPortfolios: (portfolios ?? []).length,
+    duePortfolios: dueTargets.length,
+    queuedRuns: queuedRunIds.length,
+    queuedRunIds,
+  };
 }
 
 async function runPortfolioContextTool(
@@ -1046,6 +1167,26 @@ export default {
       }
     }
 
+    if (pathname === "/api/agent/scheduled/fanout") {
+      if (method !== "POST") return json({ error: "Method not allowed" }, 405);
+
+      const body = (await request.json().catch(() => ({}))) as {
+        dryRun?: boolean;
+        nowIso?: string;
+      };
+      const now = body.nowIso ? new Date(body.nowIso) : new Date();
+      if (Number.isNaN(now.getTime())) {
+        return json({ error: "Invalid nowIso" }, 400);
+      }
+
+      const result = await runScheduledFanout(env, {
+        now,
+        dryRun: Boolean(body.dryRun),
+        source: "manual",
+      });
+      return json(result, 200);
+    }
+
     const cancelRunMatch = pathname.match(/^\/api\/agent\/runs\/([^/]+)\/cancel$/);
     if (cancelRunMatch && method === "POST") {
       const runId = cancelRunMatch[1];
@@ -1064,6 +1205,16 @@ export default {
     }
 
     return json({ error: "Not found" }, 404);
+  },
+  async scheduled(controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
+    try {
+      await runScheduledFanout(env, {
+        now: new Date(controller.scheduledTime),
+        source: "cron",
+      });
+    } catch (error) {
+      console.error("scheduled fanout failed", error);
+    }
   },
   async queue(batch: MessageBatch<AgentRunQueueMessage>, env: Env): Promise<void> {
     for (const message of batch.messages) {

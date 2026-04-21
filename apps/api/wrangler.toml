@@ -22,3 +22,8 @@ queue = "agent-runs"
 
 [[queues.consumers]]
 queue = "agent-runs"
+
+[triggers]
+# Hourly cron for scheduled fanout. Actual per-portfolio run times are selected
+# in code based on user timezone + effective runs/day setting.
+crons = ["5 * * * *"]
