@@ -5,6 +5,11 @@ export interface Env {
   SUPABASE_SERVICE_KEY: string;
   SUPABASE_ANON_KEY: string;
   AGENT_RUNS_QUEUE: Queue<AgentRunQueueMessage>;
+  GROK_MAIN_API_KEY?: string;
+  GROK_SUB_API_KEY?: string;
+  GROK_API_BASE_URL?: string;
+  MAIN_AGENT_SYSTEM_PROMPT?: string;
+  SUB_AGENT_SYSTEM_PROMPT?: string;
 }
 
 const CORS_HEADERS = {
@@ -187,6 +192,34 @@ interface GuardrailState {
   maxTotalCalls: number;
   perToolLimit: number;
   maxDurationMs: number;
+}
+
+interface SubAgentOutput {
+  macro_summary: string;
+  news_summary: string;
+  signals: Array<{
+    ticker: string;
+    status: "supportive" | "watch" | "risk";
+    reason: string;
+  }>;
+  overall_risk: "low" | "med" | "high";
+  confidence: number;
+}
+
+interface MainAgentOutput {
+  impact: "confirmed" | "watch" | "risk";
+  horizon_impact: "short_term" | "long_term" | "both";
+  rationale: string;
+  recommendations: string[];
+  confidence: number;
+}
+
+interface GrokChatResponse {
+  choices?: Array<{
+    message?: {
+      content?: string | null;
+    };
+  }>;
 }
 
 function normalizeSectorLabel(value: string | null | undefined): string | null {
@@ -501,6 +534,102 @@ function createGuardrailState(): GuardrailState {
     maxTotalCalls: 8,
     perToolLimit: 4,
     maxDurationMs: 45_000,
+  };
+}
+
+function getGrokBaseUrl(env: Env): string {
+  return (env.GROK_API_BASE_URL || "https://api.x.ai/v1").replace(/\/$/, "");
+}
+
+async function invokeGrok(
+  apiKey: string,
+  model: string,
+  systemPrompt: string,
+  userPrompt: string,
+  env: Env,
+): Promise<string> {
+  const res = await fetch(`${getGrokBaseUrl(env)}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.2,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Grok API error (${res.status}): ${body.slice(0, 400)}`);
+  }
+
+  const data = (await res.json()) as GrokChatResponse;
+  const content = data.choices?.[0]?.message?.content;
+  if (!content) throw new Error("Grok response did not include content");
+  return content;
+}
+
+function extractJsonObject(raw: string): Record<string, unknown> {
+  const trimmed = raw.trim();
+  try {
+    return JSON.parse(trimmed) as Record<string, unknown>;
+  } catch {
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      return JSON.parse(trimmed.slice(start, end + 1)) as Record<string, unknown>;
+    }
+    throw new Error("Model output is not valid JSON");
+  }
+}
+
+function normalizeSubAgentOutput(raw: Record<string, unknown>): SubAgentOutput {
+  const signalsRaw = Array.isArray(raw.signals) ? raw.signals : [];
+  return {
+    macro_summary: String(raw.macro_summary ?? ""),
+    news_summary: String(raw.news_summary ?? ""),
+    signals: signalsRaw
+      .map((item) => {
+        const row = item as Record<string, unknown>;
+        const status = String(row.status ?? "watch");
+        if (!["supportive", "watch", "risk"].includes(status)) return null;
+        return {
+          ticker: String(row.ticker ?? ""),
+          status: status as "supportive" | "watch" | "risk",
+          reason: String(row.reason ?? ""),
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => !!item),
+    overall_risk: (["low", "med", "high"].includes(String(raw.overall_risk))
+      ? String(raw.overall_risk)
+      : "med") as "low" | "med" | "high",
+    confidence: Math.min(1, Math.max(0, Number(raw.confidence ?? 0.5))),
+  };
+}
+
+function normalizeMainAgentOutput(raw: Record<string, unknown>): MainAgentOutput {
+  const impact = String(raw.impact ?? "watch");
+  const horizon = String(raw.horizon_impact ?? "both");
+  return {
+    impact: (["confirmed", "watch", "risk"].includes(impact) ? impact : "watch") as
+      | "confirmed"
+      | "watch"
+      | "risk",
+    horizon_impact: (["short_term", "long_term", "both"].includes(horizon) ? horizon : "both") as
+      | "short_term"
+      | "long_term"
+      | "both",
+    rationale: String(raw.rationale ?? ""),
+    recommendations: Array.isArray(raw.recommendations)
+      ? raw.recommendations.map((item) => String(item))
+      : [],
+    confidence: Math.min(1, Math.max(0, Number(raw.confidence ?? 0.5))),
   };
 }
 
@@ -852,13 +981,80 @@ export default {
           (input) => runMarketQuotesTool(input),
         );
 
+        if (!env.GROK_SUB_API_KEY || !env.GROK_MAIN_API_KEY) {
+          throw new Error(
+            "Missing GROK_SUB_API_KEY or GROK_MAIN_API_KEY. Set both secrets before Phase 4 processing.",
+          );
+        }
+
+        const subSystemPrompt =
+          env.SUB_AGENT_SYSTEM_PROMPT ??
+          [
+            "You are a sub-agent market signal analyst.",
+            "Return strict JSON only with keys:",
+            "macro_summary, news_summary, signals[], overall_risk, confidence.",
+            "signals[] items: { ticker, status: supportive|watch|risk, reason }",
+          ].join(" ");
+
+        const subUserPrompt = JSON.stringify(
+          {
+            portfolioId: message.body.portfolioId,
+            holdings: context.holdings,
+            theses: context.theses,
+            quotes: quotes.quotes,
+          },
+          null,
+          2,
+        );
+
+        const subRaw = await invokeGrok(
+          env.GROK_SUB_API_KEY,
+          "grok-4-1-fast-reasoning",
+          subSystemPrompt,
+          subUserPrompt,
+          env,
+        );
+        const subOutput = normalizeSubAgentOutput(extractJsonObject(subRaw));
+
+        const mainSystemPrompt =
+          env.MAIN_AGENT_SYSTEM_PROMPT ??
+          [
+            "You are a main thesis impact analyst.",
+            "Return strict JSON only with keys:",
+            "impact, horizon_impact, rationale, recommendations, confidence.",
+            "impact: confirmed|watch|risk.",
+            "horizon_impact: short_term|long_term|both.",
+          ].join(" ");
+
+        const mainUserPrompt = JSON.stringify(
+          {
+            portfolioId: message.body.portfolioId,
+            context: {
+              holdings: context.holdings,
+              theses: context.theses,
+            },
+            sub_agent: subOutput,
+          },
+          null,
+          2,
+        );
+
+        const mainRaw = await invokeGrok(
+          env.GROK_MAIN_API_KEY,
+          "grok-4.20-0309-reasoning",
+          mainSystemPrompt,
+          mainUserPrompt,
+          env,
+        );
+        const mainOutput = normalizeMainAgentOutput(extractJsonObject(mainRaw));
+
         await db(env)
           .from("agent_runs")
           .update({
             status: "completed",
             finished_at: new Date().toISOString(),
             token_usage: {
-              phase: "phase3_tooling_v1",
+              phase: "phase4_model_orchestration_v1",
               processed_by: "cloudflare_queue_consumer",
               guardrails: {
                 maxTotalCalls: guardrails.maxTotalCalls,
@@ -877,6 +1073,8 @@ export default {
                 count: quotes.quotes.length,
               },
               tool_calls: toolCalls,
+              sub_agent: subOutput,
+              main_agent: mainOutput,
             },
           })
           .eq("id", runId)
