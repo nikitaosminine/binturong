@@ -11,6 +11,7 @@ SUPABASE_URL = "https://sfqowvpuzsqgmwlecgdx.supabase.co"
 # wrangler secret put SUPABASE_ANON_KEY
 # wrangler secret put GROK_MAIN_API_KEY
 # wrangler secret put GROK_SUB_API_KEY
+# wrangler secret put FRED_API_KEY
 # Optional:
 # wrangler secret put MAIN_AGENT_SYSTEM_PROMPT
 # wrangler secret put SUB_AGENT_SYSTEM_PROMPT

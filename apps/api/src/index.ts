@@ -10,6 +10,7 @@ export interface Env {
   GROK_API_BASE_URL?: string;
   MAIN_AGENT_SYSTEM_PROMPT?: string;
   SUB_AGENT_SYSTEM_PROMPT?: string;
+  FRED_API_KEY?: string;
 }
 
 const CORS_HEADERS = {
@@ -129,7 +130,12 @@ interface AgentRunQueueMessage {
   triggerType: AgentRunTriggerType;
 }
 
-type AgentToolName = "portfolio_context" | "market_quotes";
+type AgentToolName =
+  | "portfolio_context"
+  | "market_quotes"
+  | "get_ecb_data"
+  | "get_fred_indicator"
+  | "search_news";
 
 interface AgentToolCall {
   tool: AgentToolName;
@@ -185,6 +191,30 @@ interface MarketQuotesResult {
   }>;
 }
 
+interface EcbDataResult {
+  dataset: string;
+  observations: Array<{
+    period: string;
+    value: string;
+  }>;
+}
+
+interface FredIndicatorResult {
+  series_id: string;
+  observations: Array<{
+    date: string;
+    value: string;
+  }>;
+}
+
+interface NewsSearchResult {
+  query: string;
+  items: Array<{
+    title: string;
+    link: string;
+  }>;
+}
+
 interface GuardrailState {
   startedMs: number;
   totalCalls: number;
@@ -195,23 +225,26 @@ interface GuardrailState {
 }
 
 interface SubAgentOutput {
-  macro_summary: string;
-  news_summary: string;
-  signals: Array<{
-    ticker: string;
-    status: "supportive" | "watch" | "risk";
-    reason: string;
+  findings: Array<{
+    thesis_id: string;
+    signal_type: "supportive" | "watch" | "at_risk" | "neutral";
+    title: string;
+    explanation: string;
+    relevance_score: number;
+    raw_sources: string[];
   }>;
-  overall_risk: "low" | "med" | "high";
-  confidence: number;
 }
 
 interface MainAgentOutput {
-  impact: "confirmed" | "watch" | "risk";
-  horizon_impact: "short_term" | "long_term" | "both";
-  rationale: string;
-  recommendations: string[];
-  confidence: number;
+  signals: Array<{
+    thesis_id: string;
+    signal_type: "at_risk" | "supportive" | "watch" | "neutral";
+    title: string;
+    explanation: string;
+    risk_horizon: "short_term" | "long_term" | null;
+    confidence: number;
+  }>;
+  overall_summary: string;
 }
 
 interface GrokChatResponse {
@@ -523,6 +556,78 @@ async function runMarketQuotesTool(input: { tickers: string[] }): Promise<Market
   };
 }
 
+async function runEcbDataTool(input: { dataset?: string; lastNObservations?: number }): Promise<EcbDataResult> {
+  const dataset = input.dataset || "FM/B.U2.EUR.4F.KR.MRR_FR.LEV";
+  const url = new URL(`https://data-api.ecb.europa.eu/service/data/${dataset}`);
+  url.searchParams.set("format", "csvdata");
+  url.searchParams.set("lastNObservations", String(input.lastNObservations ?? 2));
+
+  const res = await fetch(url.toString(), {
+    headers: {
+      Accept: "text/csv",
+      "User-Agent": "binturong-trace-agent/1.0",
+    },
+  });
+  if (!res.ok) throw new Error(`get_ecb_data failed (${res.status})`);
+  const text = await res.text();
+  const rows = text.split("\n").filter(Boolean);
+
+  return {
+    dataset,
+    observations: rows.slice(-3).map((row) => {
+      const cols = row.split(",");
+      return {
+        period: cols[cols.length - 2] ?? "",
+        value: cols[cols.length - 1] ?? "",
+      };
+    }),
+  };
+}
+
+async function runFredIndicatorTool(
+  env: Env,
+  input: { series_id: string; limit?: number },
+): Promise<FredIndicatorResult> {
+  if (!env.FRED_API_KEY) {
+    throw new Error("get_fred_indicator requires FRED_API_KEY secret");
+  }
+
+  const url = new URL("https://api.stlouisfed.org/fred/series/observations");
+  url.searchParams.set("series_id", input.series_id);
+  url.searchParams.set("api_key", env.FRED_API_KEY);
+  url.searchParams.set("file_type", "json");
+  url.searchParams.set("sort_order", "desc");
+  url.searchParams.set("limit", String(input.limit ?? 3));
+
+  const data = await fetchJson<{ observations?: Array<{ date?: string; value?: string }> }>(url.toString());
+  return {
+    series_id: input.series_id,
+    observations: (data.observations ?? []).map((row) => ({
+      date: row.date ?? "",
+      value: row.value ?? "",
+    })),
+  };
+}
+
+async function runNewsSearchTool(input: { query: string; limit?: number }): Promise<NewsSearchResult> {
+  const encoded = encodeURIComponent(input.query);
+  const url = `https://news.google.com/rss/search?q=${encoded}`;
+  const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+  if (!res.ok) throw new Error(`search_news failed (${res.status})`);
+  const xml = await res.text();
+  const items = Array.from(xml.matchAll(/<item>[\s\S]*?<title>(.*?)<\/title>[\s\S]*?<link>(.*?)<\/link>[\s\S]*?<\/item>/g))
+    .slice(0, input.limit ?? 6)
+    .map((match) => ({
+      title: match[1]?.replace(/<!\[CDATA\[|\]\]>/g, "") ?? "",
+      link: match[2] ?? "",
+    }));
+
+  return {
+    query: input.query,
+    items,
+  };
+}
+
 function createGuardrailState(): GuardrailState {
   return {
     startedMs: Date.now(),
@@ -530,8 +635,11 @@ function createGuardrailState(): GuardrailState {
     callsByTool: {
       portfolio_context: 0,
       market_quotes: 0,
+      get_ecb_data: 0,
+      get_fred_indicator: 0,
+      search_news: 0,
     },
-    maxTotalCalls: 8,
+    maxTotalCalls: 12,
     perToolLimit: 4,
     maxDurationMs: 45_000,
   };
@@ -590,46 +698,51 @@ function extractJsonObject(raw: string): Record<string, unknown> {
 }
 
 function normalizeSubAgentOutput(raw: Record<string, unknown>): SubAgentOutput {
-  const signalsRaw = Array.isArray(raw.signals) ? raw.signals : [];
+  const findingsRaw = Array.isArray(raw.findings) ? raw.findings : [];
   return {
-    macro_summary: String(raw.macro_summary ?? ""),
-    news_summary: String(raw.news_summary ?? ""),
-    signals: signalsRaw
+    findings: findingsRaw
       .map((item) => {
         const row = item as Record<string, unknown>;
-        const status = String(row.status ?? "watch");
-        if (!["supportive", "watch", "risk"].includes(status)) return null;
+        const signalType = String(row.signal_type ?? "neutral");
+        if (!["supportive", "watch", "at_risk", "neutral"].includes(signalType)) return null;
         return {
-          ticker: String(row.ticker ?? ""),
-          status: status as "supportive" | "watch" | "risk",
-          reason: String(row.reason ?? ""),
+          thesis_id: String(row.thesis_id ?? ""),
+          signal_type: signalType as "supportive" | "watch" | "at_risk" | "neutral",
+          title: String(row.title ?? ""),
+          explanation: String(row.explanation ?? ""),
+          relevance_score: Math.min(100, Math.max(0, Number(row.relevance_score ?? 50))),
+          raw_sources: Array.isArray(row.raw_sources)
+            ? row.raw_sources.map((source) => String(source))
+            : [],
         };
       })
       .filter((item): item is NonNullable<typeof item> => !!item),
-    overall_risk: (["low", "med", "high"].includes(String(raw.overall_risk))
-      ? String(raw.overall_risk)
-      : "med") as "low" | "med" | "high",
-    confidence: Math.min(1, Math.max(0, Number(raw.confidence ?? 0.5))),
   };
 }
 
 function normalizeMainAgentOutput(raw: Record<string, unknown>): MainAgentOutput {
-  const impact = String(raw.impact ?? "watch");
-  const horizon = String(raw.horizon_impact ?? "both");
+  const signalsRaw = Array.isArray(raw.signals) ? raw.signals : [];
   return {
-    impact: (["confirmed", "watch", "risk"].includes(impact) ? impact : "watch") as
-      | "confirmed"
-      | "watch"
-      | "risk",
-    horizon_impact: (["short_term", "long_term", "both"].includes(horizon) ? horizon : "both") as
-      | "short_term"
-      | "long_term"
-      | "both",
-    rationale: String(raw.rationale ?? ""),
-    recommendations: Array.isArray(raw.recommendations)
-      ? raw.recommendations.map((item) => String(item))
-      : [],
-    confidence: Math.min(1, Math.max(0, Number(raw.confidence ?? 0.5))),
+    signals: signalsRaw
+      .map((item) => {
+        const row = item as Record<string, unknown>;
+        const signalType = String(row.signal_type ?? "neutral");
+        if (!["at_risk", "supportive", "watch", "neutral"].includes(signalType)) return null;
+        const riskHorizon = row.risk_horizon == null ? null : String(row.risk_horizon);
+        return {
+          thesis_id: String(row.thesis_id ?? ""),
+          signal_type: signalType as "at_risk" | "supportive" | "watch" | "neutral",
+          title: String(row.title ?? ""),
+          explanation: String(row.explanation ?? ""),
+          risk_horizon:
+            riskHorizon && ["short_term", "long_term"].includes(riskHorizon)
+              ? (riskHorizon as "short_term" | "long_term")
+              : null,
+          confidence: Math.min(100, Math.max(0, Number(row.confidence ?? 50))),
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => !!item),
+    overall_summary: String(raw.overall_summary ?? ""),
   };
 }
 
@@ -676,9 +789,21 @@ async function runToolWithGuardrails<TInput, TOutput>(
             holdings: (output as PortfolioContextResult).holdings.length,
             theses: (output as PortfolioContextResult).theses.length,
           }
-        : {
+        : tool === "market_quotes"
+          ? {
             quotes: (output as MarketQuotesResult).quotes.length,
-          },
+            }
+          : tool === "get_ecb_data"
+            ? {
+                observations: (output as EcbDataResult).observations.length,
+              }
+            : tool === "get_fred_indicator"
+              ? {
+                  observations: (output as FredIndicatorResult).observations.length,
+                }
+              : {
+                  items: (output as NewsSearchResult).items.length,
+                },
   });
 
   return output;
@@ -981,6 +1106,40 @@ export default {
           (input) => runMarketQuotesTool(input),
         );
 
+        const ecbData = await runToolWithGuardrails(
+          guardrails,
+          toolCalls,
+          "get_ecb_data",
+          {
+            dataset: "FM/B.U2.EUR.4F.KR.MRR_FR.LEV",
+            lastNObservations: 2,
+          },
+          (input) => runEcbDataTool(input),
+        );
+
+        const fredData = await runToolWithGuardrails(
+          guardrails,
+          toolCalls,
+          "get_fred_indicator",
+          {
+            series_id: "FEDFUNDS",
+            limit: 3,
+          },
+          (input) => runFredIndicatorTool(env, input),
+        );
+
+        const newsQuery = contextTickers.slice(0, 5).join(" OR ") || "global markets macro";
+        const news = await runToolWithGuardrails(
+          guardrails,
+          toolCalls,
+          "search_news",
+          {
+            query: newsQuery,
+            limit: 6,
+          },
+          (input) => runNewsSearchTool(input),
+        );
+
         if (!env.GROK_SUB_API_KEY || !env.GROK_MAIN_API_KEY) {
           throw new Error(
             "Missing GROK_SUB_API_KEY or GROK_MAIN_API_KEY. Set both secrets before Phase 4 processing.",
@@ -992,8 +1151,9 @@ export default {
           [
             "You are a sub-agent market signal analyst.",
             "Return strict JSON only with keys:",
-            "macro_summary, news_summary, signals[], overall_risk, confidence.",
-            "signals[] items: { ticker, status: supportive|watch|risk, reason }",
+            "findings[].",
+            "Each finding: { thesis_id, signal_type, title, explanation, relevance_score, raw_sources }.",
+            "signal_type: supportive|watch|at_risk|neutral.",
           ].join(" ");
 
         const subUserPrompt = JSON.stringify(
@@ -1002,6 +1162,9 @@ export default {
             holdings: context.holdings,
             theses: context.theses,
             quotes: quotes.quotes,
+            ecb_data: ecbData,
+            fred_data: fredData,
+            news_items: news.items,
           },
           null,
           2,
@@ -1021,9 +1184,10 @@ export default {
           [
             "You are a main thesis impact analyst.",
             "Return strict JSON only with keys:",
-            "impact, horizon_impact, rationale, recommendations, confidence.",
-            "impact: confirmed|watch|risk.",
-            "horizon_impact: short_term|long_term|both.",
+            "signals, overall_summary.",
+            "Each signal: { thesis_id, signal_type, title, explanation, risk_horizon, confidence }.",
+            "signal_type: at_risk|supportive|watch|neutral.",
+            "risk_horizon: short_term|long_term|null.",
           ].join(" ");
 
         const mainUserPrompt = JSON.stringify(
@@ -1071,6 +1235,14 @@ export default {
               },
               quotes: {
                 count: quotes.quotes.length,
+              },
+              macro: {
+                ecb_observations: ecbData.observations.length,
+                fred_observations: fredData.observations.length,
+              },
+              news: {
+                count: news.items.length,
+                query: news.query,
               },
               tool_calls: toolCalls,
               sub_agent: subOutput,
