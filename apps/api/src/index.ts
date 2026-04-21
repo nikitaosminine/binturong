@@ -336,8 +336,13 @@ function buildIdempotencyKey(input: {
   triggerType: AgentRunTriggerType;
   now: Date;
 }): string {
-  const window = `${input.now.getUTCFullYear()}-${String(input.now.getUTCMonth() + 1).padStart(2, "0")}-${String(input.now.getUTCDate()).padStart(2, "0")}`;
-  return `${input.userId}:${input.portfolioId}:${input.triggerType}:${window}`;
+  const dayWindow = `${input.now.getUTCFullYear()}-${String(input.now.getUTCMonth() + 1).padStart(2, "0")}-${String(input.now.getUTCDate()).padStart(2, "0")}`;
+  if (input.triggerType === "scheduled") {
+    return `${input.userId}:${input.portfolioId}:${input.triggerType}:${dayWindow}`;
+  }
+
+  const minuteWindow = `${dayWindow}T${String(input.now.getUTCHours()).padStart(2, "0")}:${String(input.now.getUTCMinutes()).padStart(2, "0")}`;
+  return `${input.userId}:${input.portfolioId}:${input.triggerType}:${minuteWindow}`;
 }
 
 async function createRun(
@@ -739,6 +744,8 @@ export default {
           portfolioId?: string;
           triggerType?: AgentRunTriggerType;
           allPortfolios?: boolean;
+          idempotencyKey?: string;
+          forceNew?: boolean;
         };
 
         if (!body.userId) return json({ error: "userId is required" }, 400);
@@ -763,6 +770,7 @@ export default {
             userId: body.userId,
             portfolioId,
             triggerType,
+            idempotencyKey: body.forceNew ? crypto.randomUUID() : body.idempotencyKey,
           });
           runs.push(run);
         }
@@ -775,6 +783,7 @@ export default {
               id: run.id,
               portfolioId: run.portfolio_id,
               status: run.status,
+              idempotencyKey: run.idempotency_key,
               createdAt: run.created_at,
             })),
           },
