@@ -378,6 +378,15 @@ export default {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
 
+    if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) {
+      return json(
+        {
+          error: "Server misconfiguration: SUPABASE_URL or SUPABASE_SERVICE_KEY is missing",
+        },
+        500,
+      );
+    }
+
     // GET /api/health
     if (method === "GET" && pathname === "/api/health") {
       let supabase = "not_checked";
@@ -539,6 +548,10 @@ export default {
       }
 
       if (method === "POST") {
+        if (!env.AGENT_RUNS_QUEUE) {
+          return json({ error: "Server misconfiguration: AGENT_RUNS_QUEUE binding is missing" }, 500);
+        }
+
         const body = (await request.json()) as {
           userId?: string;
           portfolioId?: string;
