@@ -323,6 +323,15 @@ function classifyQueueProcessingError(error: unknown): {
       statusOverride: "failed_validation",
     };
   }
+  if (detail.includes("Model output missing required items")) {
+    return {
+      retryable: false,
+      errorCode: "MODEL_OUTPUT_EMPTY",
+      failureClass: "validation",
+      detail,
+      statusOverride: "failed_validation",
+    };
+  }
   if (detail.includes("Grok API error (4")) {
     return {
       retryable: false,
@@ -1716,6 +1725,9 @@ export default {
           env,
         );
         const subOutput = normalizeSubAgentOutput(extractJsonObject(subRaw));
+        if (subOutput.findings.length === 0) {
+          throw new Error("Model output missing required items: sub_agent.findings is empty");
+        }
 
         const mainSystemPrompt =
           env.MAIN_AGENT_SYSTEM_PROMPT ??
@@ -1749,6 +1761,9 @@ export default {
           env,
         );
         const mainOutput = normalizeMainAgentOutput(extractJsonObject(mainRaw));
+        if (mainOutput.signals.length === 0) {
+          throw new Error("Model output missing required items: main_agent.signals is empty");
+        }
 
         await db(env)
           .from("agent_runs")
