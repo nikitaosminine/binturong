@@ -55,12 +55,28 @@ interface PortfolioRow {
   name: string;
 }
 
+interface AgentMetricsResponse {
+  window_hours: number;
+  total_runs: number;
+  queue_depth: number;
+  success_rate: number | null;
+  counts_by_status: Record<string, number>;
+  counts_by_trigger: Record<string, number>;
+  duration_ms: {
+    samples: number;
+    avg: number | null;
+    p50: number | null;
+    p95: number | null;
+  };
+}
+
 export default function SettingsPage() {
   const { user } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [portfolios, setPortfolios] = useState<PortfolioRow[]>([]);
   const [portfolioSettings, setPortfolioSettings] = useState<AgentPortfolioSettingsResponse[]>([]);
+  const [metrics, setMetrics] = useState<AgentMetricsResponse | null>(null);
   const [settings, setSettings] = useState({
     timezone: "Europe/Paris",
     globalRunsPerDay: 2,
@@ -73,9 +89,10 @@ export default function SettingsPage() {
     void (async () => {
       try {
         setIsLoading(true);
-        const [settingsRes, portfolioSettingsRes, portfoliosRes] = await Promise.all([
+        const [settingsRes, portfolioSettingsRes, metricsRes, portfoliosRes] = await Promise.all([
           fetchApiWithFallback(`/api/agent/settings?user_id=${user.id}`),
           fetchApiWithFallback(`/api/agent/portfolio-settings?user_id=${user.id}`),
+          fetchApiWithFallback(`/api/agent/metrics?user_id=${user.id}&hours=24`),
           supabase
             .from("portfolios")
             .select("id,name")
@@ -85,11 +102,13 @@ export default function SettingsPage() {
 
         if (!settingsRes.ok) throw new Error(await settingsRes.text());
         if (!portfolioSettingsRes.ok) throw new Error(await portfolioSettingsRes.text());
+        if (!metricsRes.ok) throw new Error(await metricsRes.text());
         if (portfoliosRes.error) throw portfoliosRes.error;
 
         const settingsData = (await settingsRes.json()) as AgentUserSettingsResponse;
         const portfolioSettingsData =
           (await portfolioSettingsRes.json()) as AgentPortfolioSettingsResponse[];
+        const metricsData = (await metricsRes.json()) as AgentMetricsResponse;
 
         setSettings({
           timezone: settingsData.timezone ?? "Europe/Paris",
@@ -98,6 +117,7 @@ export default function SettingsPage() {
           autoApplyMinConfidence: settingsData.auto_apply_min_confidence ?? 0.8,
         });
         setPortfolioSettings(portfolioSettingsData ?? []);
+        setMetrics(metricsData);
         setPortfolios((portfoliosRes.data as PortfolioRow[]) ?? []);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Failed to load settings");
@@ -174,6 +194,41 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Agent run metrics (last 24h)</CardTitle>
+          <CardDescription>Quick health snapshot for queue depth, success rate, and latency.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {!metrics ? (
+            <p className="text-sm text-muted-foreground">No metrics yet.</p>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-md border border-border px-3 py-2">
+                <p className="text-xs text-muted-foreground">Total runs</p>
+                <p className="text-lg font-semibold">{metrics.total_runs}</p>
+              </div>
+              <div className="rounded-md border border-border px-3 py-2">
+                <p className="text-xs text-muted-foreground">Queue depth</p>
+                <p className="text-lg font-semibold">{metrics.queue_depth}</p>
+              </div>
+              <div className="rounded-md border border-border px-3 py-2">
+                <p className="text-xs text-muted-foreground">Success rate</p>
+                <p className="text-lg font-semibold">
+                  {metrics.success_rate == null ? "—" : `${Math.round(metrics.success_rate * 100)}%`}
+                </p>
+              </div>
+              <div className="rounded-md border border-border px-3 py-2">
+                <p className="text-xs text-muted-foreground">p95 duration</p>
+                <p className="text-lg font-semibold">
+                  {metrics.duration_ms.p95 == null ? "—" : `${Math.round(metrics.duration_ms.p95 / 1000)}s`}
+                </p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>Agent settings</CardTitle>

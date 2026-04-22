@@ -224,6 +224,13 @@ interface GuardrailState {
   maxDurationMs: number;
 }
 
+function percentile(values: number[], p: number): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const rank = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1));
+  return sorted[rank] ?? null;
+}
+
 interface SubAgentOutput {
   findings: Array<{
     thesis_id: string;
@@ -1263,6 +1270,75 @@ export default {
         if (error) return json({ error: error.message }, 500);
         return json(data, 200);
       }
+    }
+
+    if (pathname === "/api/agent/metrics") {
+      if (method !== "GET") return json({ error: "Method not allowed" }, 405);
+      const userId = url.searchParams.get("user_id");
+      if (!userId) return json({ error: "user_id is required" }, 400);
+
+      const hours = Math.max(1, Math.min(168, Number(url.searchParams.get("hours") ?? 24)));
+      const fromIso = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+
+      const { data, error } = await db(env)
+        .from("agent_runs")
+        .select("id,status,trigger_type,created_at,started_at,finished_at,error_code")
+        .eq("user_id", userId)
+        .gte("created_at", fromIso)
+        .order("created_at", { ascending: false })
+        .limit(1000);
+      if (error) return json({ error: error.message }, 500);
+
+      const rows = data ?? [];
+      const countsByStatus = rows.reduce<Record<string, number>>((acc, row) => {
+        const key = String(row.status);
+        acc[key] = (acc[key] ?? 0) + 1;
+        return acc;
+      }, {});
+      const countsByTrigger = rows.reduce<Record<string, number>>((acc, row) => {
+        const key = String(row.trigger_type);
+        acc[key] = (acc[key] ?? 0) + 1;
+        return acc;
+      }, {});
+      const durationsMs = rows
+        .map((row) => {
+          if (!row.started_at || !row.finished_at) return null;
+          const ms = new Date(row.finished_at).getTime() - new Date(row.started_at).getTime();
+          return Number.isFinite(ms) && ms >= 0 ? ms : null;
+        })
+        .filter((ms): ms is number => ms != null);
+      const completed = countsByStatus.completed ?? 0;
+      const failed = countsByStatus.failed ?? 0;
+      const successRate = completed + failed > 0 ? completed / (completed + failed) : null;
+
+      return json(
+        {
+          window_hours: hours,
+          from_iso: fromIso,
+          total_runs: rows.length,
+          counts_by_status: countsByStatus,
+          counts_by_trigger: countsByTrigger,
+          queue_depth: (countsByStatus.queued ?? 0) + (countsByStatus.running ?? 0),
+          success_rate: successRate,
+          duration_ms: {
+            samples: durationsMs.length,
+            avg:
+              durationsMs.length > 0
+                ? Math.round(durationsMs.reduce((sum, ms) => sum + ms, 0) / durationsMs.length)
+                : null,
+            p50: percentile(durationsMs, 50),
+            p95: percentile(durationsMs, 95),
+          },
+          failures_with_error_code: rows
+            .filter((row) => row.status === "failed")
+            .reduce<Record<string, number>>((acc, row) => {
+              const key = String(row.error_code ?? "UNKNOWN");
+              acc[key] = (acc[key] ?? 0) + 1;
+              return acc;
+            }, {}),
+        },
+        200,
+      );
     }
 
     if (pathname === "/api/agent/scheduled/fanout") {
