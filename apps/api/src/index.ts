@@ -1432,6 +1432,60 @@ export default {
       return json(summarizeRunMetrics(data ?? [], { hours, fromIso }), 200);
     }
 
+    if (pathname === "/api/agent/feed") {
+      if (method !== "GET") return json({ error: "Method not allowed" }, 405);
+      const userId = url.searchParams.get("user_id");
+      if (!userId) return json({ error: "user_id is required" }, 400);
+      const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") ?? 50)));
+
+      const { data, error } = await db(env)
+        .from("agent_runs")
+        .select("id,portfolio_id,created_at,token_usage,status,trigger_type")
+        .eq("user_id", userId)
+        .eq("status", "completed")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (error) return json({ error: error.message }, 500);
+
+      const insights = (data ?? [])
+        .flatMap((run) => {
+          const tokenUsage = (run.token_usage ?? {}) as Record<string, unknown>;
+          const main = (tokenUsage.main_agent ?? {}) as Record<string, unknown>;
+          const signals = Array.isArray(main.signals)
+            ? (main.signals as Array<Record<string, unknown>>)
+            : [];
+          return signals.map((signal, index) => {
+            const type = String(signal.signal_type ?? "neutral");
+            const status =
+              type === "at_risk"
+                ? "At risk"
+                : type === "supportive"
+                  ? "Supportive"
+                  : type === "watch"
+                    ? "Watch"
+                    : "Neutral";
+            return {
+              id: `${run.id}:${index}`,
+              run_id: run.id,
+              portfolio_id: run.portfolio_id,
+              created_at: run.created_at,
+              trigger_type: run.trigger_type,
+              source: "agent",
+              thesis_id: String(signal.thesis_id ?? ""),
+              status,
+              headline: String(signal.title ?? "Agent signal"),
+              body: String(signal.explanation ?? ""),
+              confidence: Number(signal.confidence ?? 50),
+              risk_horizon:
+                signal.risk_horizon == null ? null : String(signal.risk_horizon),
+            };
+          });
+        })
+        .slice(0, limit);
+
+      return json({ insights }, 200);
+    }
+
     if (pathname === "/api/agent/alerts") {
       if (method !== "GET") return json({ error: "Method not allowed" }, 405);
       const userId = url.searchParams.get("user_id");

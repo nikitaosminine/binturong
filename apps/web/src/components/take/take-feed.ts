@@ -2,12 +2,15 @@ import { Thesis } from "@/lib/thesis";
 
 export type InsightStatus = "At risk" | "Supportive" | "Neutral" | "Watch";
 export type DateBucket = "Today" | "Yesterday" | "This week" | "Earlier";
+export type InsightSource = "market" | "agent";
 
 export interface TakeInsight {
   id: string;
   thesisId: string;
   ticker: string;
   status: InsightStatus;
+  source: InsightSource;
+  confidence?: number | null;
   headline: string;
   body: string;
   hoursAgo: number;
@@ -118,6 +121,7 @@ function mockInsightsForTheses(theses: Thesis[]): TakeInsight[] {
       thesisId: target.id,
       ticker: target.tickers[0] ?? "N/A",
       status: template.status,
+      source: "market",
       headline: template.headline,
       body: template.body,
       hoursAgo: template.hoursAgo,
@@ -139,6 +143,7 @@ export function insightFromTheses(theses: Thesis[]): TakeInsight[] {
             : evidence.type === "confirm"
               ? "Supportive"
               : "Neutral",
+        source: "market",
         headline: evidence.text,
         body: `${thesis.title} · ${thesis.summary}`,
         hoursAgo: toHoursAgo(evidence.date),

@@ -1,7 +1,8 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Sparkles, X } from "lucide-react";
 import { useOutletContext } from "react-router-dom";
 import { Thesis } from "@/lib/thesis";
+import { useAuth } from "@/hooks/use-auth";
 import { TakePageHeader } from "@/components/take/take-page-header";
 import { Button } from "@/components/ui/button";
 import { TakeToolbar, FilterTab } from "@/components/take/take-toolbar";
@@ -12,6 +13,7 @@ import {
   BUCKET_ORDER,
   DateBucket,
   InsightStatus,
+  TakeInsight,
   bucketFor,
   insightFromTheses,
   rankScore,
@@ -42,23 +44,77 @@ const FEED_FILTERS: ("All" | InsightStatus)[] = [
   "Watch",
   "Neutral",
 ];
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL ??
+  "https://binturong-api.nikita-osminine.workers.dev";
 
 export default function ThesesPage() {
   const { theses, openDrawer, openModal } = useOutletContext<ThesisContext>();
+  const { user } = useAuth();
   const [filter, setFilter] = useState<FilterTab>("all");
   const [search, setSearch] = useState("");
   const [feedFilter, setFeedFilter] = useState<"All" | InsightStatus>("All");
+  const [sourceFilter, setSourceFilter] = useState<"all" | "agent" | "market">("all");
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [selectedThesis, setSelectedThesis] = useState<string | null>(null);
   const [selectedInsight, setSelectedInsight] = useState<string | null>(null);
+  const [agentInsights, setAgentInsights] = useState<TakeInsight[]>([]);
 
-  const insights = useMemo(() => insightFromTheses(theses), [theses]);
+  useEffect(() => {
+    if (!user?.id) return;
+    void (async () => {
+      const response = await fetch(`${API_BASE_URL}/api/agent/feed?user_id=${user.id}&limit=50`);
+      if (!response.ok) return;
+      const payload = (await response.json()) as {
+        insights?: Array<{
+          id: string;
+          thesis_id: string;
+          status: InsightStatus;
+          headline: string;
+          body: string;
+          created_at: string;
+          confidence?: number;
+        }>;
+      };
+      const mapped = (payload.insights ?? []).map((insight) => {
+        const thesis = theses.find((item) => item.id === insight.thesis_id);
+        const createdAt = new Date(insight.created_at).getTime();
+        const hoursAgo = Number.isFinite(createdAt)
+          ? Math.max(0, (Date.now() - createdAt) / (1000 * 60 * 60))
+          : 0;
+        return {
+          id: `agent:${insight.id}`,
+          thesisId: insight.thesis_id,
+          ticker: thesis?.tickers[0] ?? "N/A",
+          status: insight.status,
+          source: "agent" as const,
+          confidence: insight.confidence ?? null,
+          headline: insight.headline,
+          body: insight.body,
+          hoursAgo,
+          unread: hoursAgo < 24,
+        };
+      });
+      setAgentInsights(mapped);
+    })();
+  }, [user?.id, theses]);
+
+  const insights = useMemo(
+    () =>
+      [...agentInsights, ...insightFromTheses(theses)].sort(
+        (a, b) => a.hoursAgo - b.hoursAgo,
+      ),
+    [agentInsights, theses],
+  );
 
   const visibleInsights = useMemo(() => {
     let list = insights.filter((insight) => !dismissed.has(insight.id));
 
     if (feedFilter !== "All") {
       list = list.filter((insight) => insight.status === feedFilter);
+    }
+    if (sourceFilter !== "all") {
+      list = list.filter((insight) => insight.source === sourceFilter);
     }
 
     if (selectedThesis) {
@@ -70,7 +126,7 @@ export default function ThesesPage() {
       const thesisB = theses.find((thesis) => thesis.id === b.thesisId);
       return rankScore(b, thesisB) - rankScore(a, thesisA);
     });
-  }, [dismissed, feedFilter, insights, selectedThesis, theses]);
+  }, [dismissed, feedFilter, insights, selectedThesis, sourceFilter, theses]);
 
   const groupedInsights = useMemo(() => {
     const map = new Map<DateBucket, typeof visibleInsights>();
@@ -217,6 +273,21 @@ export default function ThesesPage() {
                 }`}
               >
                 {status}
+              </button>
+            ))}
+          </div>
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            {(["all", "agent", "market"] as const).map((source) => (
+              <button
+                key={source}
+                onClick={() => setSourceFilter(source)}
+                className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
+                  sourceFilter === source
+                    ? "border-primary/40 bg-primary/15 text-primary"
+                    : "border-border/50 bg-muted/40 text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {source === "all" ? "All sources" : source === "agent" ? "Agent" : "Market"}
               </button>
             ))}
           </div>
