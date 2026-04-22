@@ -11,7 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_URL ??
-  (import.meta.env.PROD ? "https://binturong-api.nikita-osminine.workers.dev" : "http://localhost:8787");
+  "https://binturong-api.nikita-osminine.workers.dev";
 
 interface AgentUserSettingsResponse {
   user_id: string;
