@@ -6,6 +6,7 @@ import PortfoliosPage from "./routes/portfolios";
 import PortfolioDetailPage from "./routes/portfolio-detail";
 import ThesesPage from "./routes/theses";
 import RootRedirect from "./routes/redirect";
+import SettingsPage from "./routes/settings";
 
 export const router = createBrowserRouter([
   {
@@ -19,6 +20,7 @@ export const router = createBrowserRouter([
           { path: "portfolios",              element: <PortfoliosPage /> },
           { path: "portfolios/:portfolioId", element: <PortfolioDetailPage /> },
           { path: "the-take",                element: <ThesesPage /> },
+          { path: "settings",                element: <SettingsPage /> },
         ],
       },
     ],

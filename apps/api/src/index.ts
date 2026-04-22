@@ -1167,6 +1167,104 @@ export default {
       }
     }
 
+    if (pathname === "/api/agent/settings") {
+      if (method === "GET") {
+        const userId = url.searchParams.get("user_id");
+        if (!userId) return json({ error: "user_id is required" }, 400);
+
+        const { data, error } = await db(env)
+          .from("agent_user_settings")
+          .select("*")
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (error) return json({ error: error.message }, 500);
+        return json(
+          data ?? {
+            user_id: userId,
+            timezone: "Europe/Paris",
+            global_runs_per_day: 2,
+            auto_apply_enabled: false,
+            auto_apply_min_confidence: 0.8,
+          },
+        );
+      }
+
+      if (method === "PUT") {
+        const body = (await request.json()) as {
+          userId?: string;
+          timezone?: string;
+          globalRunsPerDay?: number;
+          autoApplyEnabled?: boolean;
+          autoApplyMinConfidence?: number;
+        };
+        if (!body.userId) return json({ error: "userId is required" }, 400);
+
+        const payload = {
+          user_id: body.userId,
+          timezone: body.timezone ?? "Europe/Paris",
+          global_runs_per_day: Math.max(1, Math.min(3, Number(body.globalRunsPerDay ?? 2))),
+          auto_apply_enabled: Boolean(body.autoApplyEnabled ?? false),
+          auto_apply_min_confidence: Math.max(
+            0,
+            Math.min(1, Number(body.autoApplyMinConfidence ?? 0.8)),
+          ),
+        };
+
+        const { data, error } = await db(env)
+          .from("agent_user_settings")
+          .upsert(payload, { onConflict: "user_id" })
+          .select("*")
+          .single();
+        if (error) return json({ error: error.message }, 500);
+        return json(data, 200);
+      }
+    }
+
+    if (pathname === "/api/agent/portfolio-settings") {
+      if (method === "GET") {
+        const userId = url.searchParams.get("user_id");
+        if (!userId) return json({ error: "user_id is required" }, 400);
+
+        const { data, error } = await db(env)
+          .from("agent_portfolio_settings")
+          .select("*")
+          .eq("user_id", userId)
+          .order("created_at", { ascending: true });
+        if (error) return json({ error: error.message }, 500);
+        return json(data ?? []);
+      }
+
+      if (method === "PUT") {
+        const body = (await request.json()) as {
+          userId?: string;
+          portfolioId?: string;
+          runsPerDayOverride?: number | null;
+          agentEnabled?: boolean;
+        };
+        if (!body.userId || !body.portfolioId) {
+          return json({ error: "userId and portfolioId are required" }, 400);
+        }
+
+        const payload = {
+          user_id: body.userId,
+          portfolio_id: body.portfolioId,
+          runs_per_day_override:
+            body.runsPerDayOverride == null
+              ? null
+              : Math.max(1, Math.min(3, Number(body.runsPerDayOverride))),
+          agent_enabled: body.agentEnabled == null ? true : Boolean(body.agentEnabled),
+        };
+
+        const { data, error } = await db(env)
+          .from("agent_portfolio_settings")
+          .upsert(payload, { onConflict: "portfolio_id" })
+          .select("*")
+          .single();
+        if (error) return json({ error: error.message }, 500);
+        return json(data, 200);
+      }
+    }
+
     if (pathname === "/api/agent/scheduled/fanout") {
       if (method !== "POST") return json({ error: "Method not allowed" }, 405);
 
