@@ -9,9 +9,30 @@ import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_URL ??
-  "https://binturong-api.nikita-osminine.workers.dev";
+const DEPLOYED_API_BASE_URL = "https://binturong-api.nikita-osminine.workers.dev";
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? DEPLOYED_API_BASE_URL;
+
+async function fetchApiWithFallback(path: string, init?: RequestInit): Promise<Response> {
+  const primaryUrl = `${API_BASE_URL}${path}`;
+  const fallbackUrl = `${DEPLOYED_API_BASE_URL}${path}`;
+  const canFallback = API_BASE_URL !== DEPLOYED_API_BASE_URL;
+
+  try {
+    const primary = await fetch(primaryUrl, init);
+    if (!canFallback) return primary;
+
+    if (primary.ok) return primary;
+
+    const body = await primary.clone().text().catch(() => "");
+    const hasServerConfigError = body.includes("Server misconfiguration");
+    if (!hasServerConfigError) return primary;
+
+    return fetch(fallbackUrl, init);
+  } catch (error) {
+    if (!canFallback) throw error;
+    return fetch(fallbackUrl, init);
+  }
+}
 
 interface AgentUserSettingsResponse {
   user_id: string;
@@ -53,8 +74,8 @@ export default function SettingsPage() {
       try {
         setIsLoading(true);
         const [settingsRes, portfolioSettingsRes, portfoliosRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/api/agent/settings?user_id=${user.id}`),
-          fetch(`${API_BASE_URL}/api/agent/portfolio-settings?user_id=${user.id}`),
+          fetchApiWithFallback(`/api/agent/settings?user_id=${user.id}`),
+          fetchApiWithFallback(`/api/agent/portfolio-settings?user_id=${user.id}`),
           supabase
             .from("portfolios")
             .select("id,name")
@@ -95,7 +116,7 @@ export default function SettingsPage() {
     if (!user?.id) return;
     try {
       setIsSaving(true);
-      const response = await fetch(`${API_BASE_URL}/api/agent/settings`, {
+      const response = await fetchApiWithFallback("/api/agent/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -122,7 +143,7 @@ export default function SettingsPage() {
     if (!user?.id) return;
     try {
       const existing = portfolioSettingsMap.get(portfolioId);
-      const response = await fetch(`${API_BASE_URL}/api/agent/portfolio-settings`, {
+      const response = await fetchApiWithFallback("/api/agent/portfolio-settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
