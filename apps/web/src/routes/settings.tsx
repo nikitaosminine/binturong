@@ -102,13 +102,14 @@ export default function SettingsPage() {
 
         if (!settingsRes.ok) throw new Error(await settingsRes.text());
         if (!portfolioSettingsRes.ok) throw new Error(await portfolioSettingsRes.text());
-        if (!metricsRes.ok) throw new Error(await metricsRes.text());
         if (portfoliosRes.error) throw portfoliosRes.error;
 
         const settingsData = (await settingsRes.json()) as AgentUserSettingsResponse;
         const portfolioSettingsData =
           (await portfolioSettingsRes.json()) as AgentPortfolioSettingsResponse[];
-        const metricsData = (await metricsRes.json()) as AgentMetricsResponse;
+        const metricsData = metricsRes.ok
+          ? ((await metricsRes.json()) as AgentMetricsResponse)
+          : null;
 
         setSettings({
           timezone: settingsData.timezone ?? "Europe/Paris",
