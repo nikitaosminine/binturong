@@ -70,6 +70,15 @@ interface AgentMetricsResponse {
   };
 }
 
+interface AgentAlertsResponse {
+  alerts: Array<{
+    key: string;
+    triggered: boolean;
+    value: number | null;
+    threshold: number;
+  }>;
+}
+
 export default function SettingsPage() {
   const { user } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
@@ -77,6 +86,7 @@ export default function SettingsPage() {
   const [portfolios, setPortfolios] = useState<PortfolioRow[]>([]);
   const [portfolioSettings, setPortfolioSettings] = useState<AgentPortfolioSettingsResponse[]>([]);
   const [metrics, setMetrics] = useState<AgentMetricsResponse | null>(null);
+  const [alerts, setAlerts] = useState<AgentAlertsResponse["alerts"]>([]);
   const [settings, setSettings] = useState({
     timezone: "Europe/Paris",
     globalRunsPerDay: 2,
@@ -89,16 +99,18 @@ export default function SettingsPage() {
     void (async () => {
       try {
         setIsLoading(true);
-        const [settingsRes, portfolioSettingsRes, metricsRes, portfoliosRes] = await Promise.all([
+        const [settingsRes, portfolioSettingsRes, metricsRes, alertsRes, portfoliosRes] =
+          await Promise.all([
           fetchApiWithFallback(`/api/agent/settings?user_id=${user.id}`),
           fetchApiWithFallback(`/api/agent/portfolio-settings?user_id=${user.id}`),
           fetchApiWithFallback(`/api/agent/metrics?user_id=${user.id}&hours=24`),
+          fetchApiWithFallback(`/api/agent/alerts?user_id=${user.id}&hours=24`),
           supabase
             .from("portfolios")
             .select("id,name")
             .eq("user_id", user.id)
             .order("name", { ascending: true }),
-        ]);
+          ]);
 
         if (!settingsRes.ok) throw new Error(await settingsRes.text());
         if (!portfolioSettingsRes.ok) throw new Error(await portfolioSettingsRes.text());
@@ -110,6 +122,7 @@ export default function SettingsPage() {
         const metricsData = metricsRes.ok
           ? ((await metricsRes.json()) as AgentMetricsResponse)
           : null;
+        const alertsData = alertsRes.ok ? ((await alertsRes.json()) as AgentAlertsResponse) : null;
 
         setSettings({
           timezone: settingsData.timezone ?? "Europe/Paris",
@@ -119,6 +132,7 @@ export default function SettingsPage() {
         });
         setPortfolioSettings(portfolioSettingsData ?? []);
         setMetrics(metricsData);
+        setAlerts(alertsData?.alerts ?? []);
         setPortfolios((portfoliosRes.data as PortfolioRow[]) ?? []);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Failed to load settings");
@@ -223,6 +237,17 @@ export default function SettingsPage() {
                 <p className="text-xs text-muted-foreground">p95 duration</p>
                 <p className="text-lg font-semibold">
                   {metrics.duration_ms.p95 == null ? "—" : `${Math.round(metrics.duration_ms.p95 / 1000)}s`}
+                </p>
+              </div>
+              <div className="rounded-md border border-border px-3 py-2 sm:col-span-2 lg:col-span-4">
+                <p className="text-xs text-muted-foreground">Triggered alerts</p>
+                <p className="text-sm font-medium">
+                  {alerts.filter((alert) => alert.triggered).length === 0
+                    ? "No active alerts"
+                    : alerts
+                        .filter((alert) => alert.triggered)
+                        .map((alert) => alert.key)
+                        .join(", ")}
                 </p>
               </div>
             </div>

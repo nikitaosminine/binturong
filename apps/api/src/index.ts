@@ -231,6 +231,146 @@ function percentile(values: number[], p: number): number | null {
   return sorted[rank] ?? null;
 }
 
+interface AgentRunMetricsSummary {
+  window_hours: number;
+  from_iso: string;
+  total_runs: number;
+  counts_by_status: Record<string, number>;
+  counts_by_trigger: Record<string, number>;
+  queue_depth: number;
+  success_rate: number | null;
+  duration_ms: {
+    samples: number;
+    avg: number | null;
+    p50: number | null;
+    p95: number | null;
+  };
+  failures_with_error_code: Record<string, number>;
+}
+
+function summarizeRunMetrics(
+  rows: Array<{
+    status: string | null;
+    trigger_type: string | null;
+    started_at: string | null;
+    finished_at: string | null;
+    error_code: string | null;
+  }>,
+  options: { hours: number; fromIso: string },
+): AgentRunMetricsSummary {
+  const countsByStatus = rows.reduce<Record<string, number>>((acc, row) => {
+    const key = String(row.status ?? "unknown");
+    acc[key] = (acc[key] ?? 0) + 1;
+    return acc;
+  }, {});
+  const countsByTrigger = rows.reduce<Record<string, number>>((acc, row) => {
+    const key = String(row.trigger_type ?? "unknown");
+    acc[key] = (acc[key] ?? 0) + 1;
+    return acc;
+  }, {});
+  const durationsMs = rows
+    .map((row) => {
+      if (!row.started_at || !row.finished_at) return null;
+      const ms = new Date(row.finished_at).getTime() - new Date(row.started_at).getTime();
+      return Number.isFinite(ms) && ms >= 0 ? ms : null;
+    })
+    .filter((ms): ms is number => ms != null);
+  const completed = countsByStatus.completed ?? 0;
+  const failed = countsByStatus.failed ?? 0;
+  const successRate = completed + failed > 0 ? completed / (completed + failed) : null;
+
+  return {
+    window_hours: options.hours,
+    from_iso: options.fromIso,
+    total_runs: rows.length,
+    counts_by_status: countsByStatus,
+    counts_by_trigger: countsByTrigger,
+    queue_depth: (countsByStatus.queued ?? 0) + (countsByStatus.running ?? 0),
+    success_rate: successRate,
+    duration_ms: {
+      samples: durationsMs.length,
+      avg:
+        durationsMs.length > 0
+          ? Math.round(durationsMs.reduce((sum, ms) => sum + ms, 0) / durationsMs.length)
+          : null,
+      p50: percentile(durationsMs, 50),
+      p95: percentile(durationsMs, 95),
+    },
+    failures_with_error_code: rows
+      .filter((row) => row.status === "failed")
+      .reduce<Record<string, number>>((acc, row) => {
+        const key = String(row.error_code ?? "UNKNOWN");
+        acc[key] = (acc[key] ?? 0) + 1;
+        return acc;
+      }, {}),
+  };
+}
+
+function classifyQueueProcessingError(error: unknown): {
+  retryable: boolean;
+  errorCode: string;
+  failureClass: string;
+  detail: string;
+  statusOverride?: "failed_validation" | "failed";
+} {
+  const detail = error instanceof Error ? error.message : "Unknown queue processing error";
+  if (detail.includes("Model output is not valid JSON")) {
+    return {
+      retryable: false,
+      errorCode: "MODEL_OUTPUT_INVALID_JSON",
+      failureClass: "validation",
+      detail,
+      statusOverride: "failed_validation",
+    };
+  }
+  if (detail.includes("Grok API error (4")) {
+    return {
+      retryable: false,
+      errorCode: "UPSTREAM_GROK_4XX",
+      failureClass: "upstream_permanent",
+      detail,
+    };
+  }
+  if (detail.includes("Grok API error (5")) {
+    return {
+      retryable: true,
+      errorCode: "UPSTREAM_GROK_5XX",
+      failureClass: "upstream_transient",
+      detail,
+    };
+  }
+  if (detail.includes("Missing ") || detail.includes("Server misconfiguration")) {
+    return {
+      retryable: false,
+      errorCode: "CONFIGURATION_ERROR",
+      failureClass: "configuration",
+      detail,
+    };
+  }
+  if (detail.includes("Guardrail:")) {
+    return {
+      retryable: false,
+      errorCode: "GUARDRAIL_LIMIT_HIT",
+      failureClass: "guardrail",
+      detail,
+    };
+  }
+  if (detail.includes("Yahoo API error (429")) {
+    return {
+      retryable: true,
+      errorCode: "UPSTREAM_YAHOO_429",
+      failureClass: "upstream_transient",
+      detail,
+    };
+  }
+  return {
+    retryable: true,
+    errorCode: "QUEUE_PROCESSING_ERROR",
+    failureClass: "unknown",
+    detail,
+  };
+}
+
 interface SubAgentOutput {
   findings: Array<{
     thesis_id: string;
@@ -1289,53 +1429,72 @@ export default {
         .limit(1000);
       if (error) return json({ error: error.message }, 500);
 
-      const rows = data ?? [];
-      const countsByStatus = rows.reduce<Record<string, number>>((acc, row) => {
-        const key = String(row.status);
-        acc[key] = (acc[key] ?? 0) + 1;
-        return acc;
-      }, {});
-      const countsByTrigger = rows.reduce<Record<string, number>>((acc, row) => {
-        const key = String(row.trigger_type);
-        acc[key] = (acc[key] ?? 0) + 1;
-        return acc;
-      }, {});
-      const durationsMs = rows
-        .map((row) => {
-          if (!row.started_at || !row.finished_at) return null;
-          const ms = new Date(row.finished_at).getTime() - new Date(row.started_at).getTime();
-          return Number.isFinite(ms) && ms >= 0 ? ms : null;
-        })
-        .filter((ms): ms is number => ms != null);
-      const completed = countsByStatus.completed ?? 0;
-      const failed = countsByStatus.failed ?? 0;
-      const successRate = completed + failed > 0 ? completed / (completed + failed) : null;
+      return json(summarizeRunMetrics(data ?? [], { hours, fromIso }), 200);
+    }
+
+    if (pathname === "/api/agent/alerts") {
+      if (method !== "GET") return json({ error: "Method not allowed" }, 405);
+      const userId = url.searchParams.get("user_id");
+      if (!userId) return json({ error: "user_id is required" }, 400);
+
+      const hours = Math.max(1, Math.min(168, Number(url.searchParams.get("hours") ?? 24)));
+      const queueDepthThreshold = Math.max(
+        1,
+        Math.min(200, Number(url.searchParams.get("queue_depth_threshold") ?? 5)),
+      );
+      const successRateThreshold = Math.max(
+        0,
+        Math.min(1, Number(url.searchParams.get("success_rate_threshold") ?? 0.9)),
+      );
+      const p95MsThreshold = Math.max(
+        1000,
+        Math.min(60 * 60 * 1000, Number(url.searchParams.get("p95_ms_threshold") ?? 120000)),
+      );
+      const fromIso = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+
+      const { data, error } = await db(env)
+        .from("agent_runs")
+        .select("status,trigger_type,started_at,finished_at,error_code")
+        .eq("user_id", userId)
+        .gte("created_at", fromIso)
+        .order("created_at", { ascending: false })
+        .limit(1000);
+      if (error) return json({ error: error.message }, 500);
+
+      const metrics = summarizeRunMetrics(data ?? [], { hours, fromIso });
+      const alerts = [
+        {
+          key: "queue_depth_high",
+          triggered: metrics.queue_depth >= queueDepthThreshold,
+          value: metrics.queue_depth,
+          threshold: queueDepthThreshold,
+        },
+        {
+          key: "success_rate_low",
+          triggered:
+            metrics.success_rate != null && metrics.success_rate <= successRateThreshold,
+          value: metrics.success_rate,
+          threshold: successRateThreshold,
+        },
+        {
+          key: "p95_latency_high",
+          triggered:
+            metrics.duration_ms.p95 != null && metrics.duration_ms.p95 >= p95MsThreshold,
+          value: metrics.duration_ms.p95,
+          threshold: p95MsThreshold,
+        },
+      ];
 
       return json(
         {
           window_hours: hours,
-          from_iso: fromIso,
-          total_runs: rows.length,
-          counts_by_status: countsByStatus,
-          counts_by_trigger: countsByTrigger,
-          queue_depth: (countsByStatus.queued ?? 0) + (countsByStatus.running ?? 0),
-          success_rate: successRate,
-          duration_ms: {
-            samples: durationsMs.length,
-            avg:
-              durationsMs.length > 0
-                ? Math.round(durationsMs.reduce((sum, ms) => sum + ms, 0) / durationsMs.length)
-                : null,
-            p50: percentile(durationsMs, 50),
-            p95: percentile(durationsMs, 95),
+          thresholds: {
+            queue_depth_threshold: queueDepthThreshold,
+            success_rate_threshold: successRateThreshold,
+            p95_ms_threshold: p95MsThreshold,
           },
-          failures_with_error_code: rows
-            .filter((row) => row.status === "failed")
-            .reduce<Record<string, number>>((acc, row) => {
-              const key = String(row.error_code ?? "UNKNOWN");
-              acc[key] = (acc[key] ?? 0) + 1;
-              return acc;
-            }, {}),
+          alerts,
+          metrics,
         },
         200,
       );
@@ -1579,16 +1738,23 @@ export default {
 
         message.ack();
       } catch (error) {
+        const classified = classifyQueueProcessingError(error);
         await db(env)
           .from("agent_runs")
           .update({
-            status: "failed",
+            status: classified.statusOverride ?? "failed",
             finished_at: new Date().toISOString(),
-            error_code: "QUEUE_PROCESSING_ERROR",
-            error_detail: error instanceof Error ? error.message : "Unknown queue processing error",
+            error_code: classified.errorCode,
+            error_detail: classified.detail,
+            token_usage: {
+              phase: "phase8_failure_classification_v1",
+              failure_class: classified.failureClass,
+              retryable: classified.retryable,
+            },
           })
           .eq("id", runId);
-        message.retry();
+        if (classified.retryable) message.retry();
+        else message.ack();
       }
     }
   },
