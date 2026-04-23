@@ -1099,32 +1099,63 @@ function extractJsonObject(raw: string): Record<string, unknown> {
 
 function normalizeSubAgentOutput(raw: Record<string, unknown>): SubAgentOutput {
   const evidenceRaw = Array.isArray(raw.evidence_items) ? raw.evidence_items : [];
+  const findingsRaw = Array.isArray(raw.findings) ? raw.findings : [];
   const missingInfoRaw = Array.isArray(raw.missing_info) ? raw.missing_info : [];
   const retrievalMeta = (raw.retrieval_meta ?? {}) as Record<string, unknown>;
+  const normalizedEvidence = evidenceRaw
+    .map((item) => {
+      const row = item as Record<string, unknown>;
+      const url = String(row.url ?? "");
+      if (!/^https?:\/\//i.test(url)) return null;
+      return {
+        id: String(row.id ?? ""),
+        thesis_id: String(row.thesis_id ?? ""),
+        claim: String(row.claim ?? ""),
+        snippet: String(row.snippet ?? ""),
+        url,
+        source: String(row.source ?? inferSourceFromUrl(url)),
+        published_at: parseIsoDateOrNull(row.published_at),
+        is_stale: Boolean(row.is_stale),
+        staleness_reason: row.staleness_reason == null ? null : String(row.staleness_reason),
+        relevance_score: Math.min(100, Math.max(0, Number(row.relevance_score ?? 50))),
+        tags: Array.isArray(row.tags) ? row.tags.map((tag) => String(tag)) : [],
+      };
+    })
+    .filter(
+      (item): item is NonNullable<typeof item> =>
+        !!item && Boolean(item.id) && Boolean(item.thesis_id) && Boolean(item.claim),
+    );
+
+  const legacyEvidence = findingsRaw
+    .map((item, index) => {
+      const row = item as Record<string, unknown>;
+      const rawSources = Array.isArray(row.raw_sources)
+        ? row.raw_sources.map((source) => String(source))
+        : [];
+      const url = rawSources.find((source) => /^https?:\/\//i.test(source)) ?? "";
+      if (!url) return null;
+      const thesisId = String(row.thesis_id ?? "");
+      const claim = String(row.title ?? row.explanation ?? "");
+      if (!thesisId || !claim) return null;
+      return {
+        id: `${thesisId}:legacy:${index}`,
+        thesis_id: thesisId,
+        claim,
+        snippet: String(row.explanation ?? ""),
+        url,
+        source: inferSourceFromUrl(url),
+        published_at: null,
+        is_stale: false,
+        staleness_reason: "legacy_sub_agent_format",
+        relevance_score: Math.min(100, Math.max(0, Number(row.relevance_score ?? 50))),
+        tags: ["legacy_findings"],
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => !!item);
+
+  const evidenceItems = normalizedEvidence.length > 0 ? normalizedEvidence : legacyEvidence;
   return {
-    evidence_items: evidenceRaw
-      .map((item) => {
-        const row = item as Record<string, unknown>;
-        const url = String(row.url ?? "");
-        if (!/^https?:\/\//i.test(url)) return null;
-        return {
-          id: String(row.id ?? ""),
-          thesis_id: String(row.thesis_id ?? ""),
-          claim: String(row.claim ?? ""),
-          snippet: String(row.snippet ?? ""),
-          url,
-          source: String(row.source ?? inferSourceFromUrl(url)),
-          published_at: parseIsoDateOrNull(row.published_at),
-          is_stale: Boolean(row.is_stale),
-          staleness_reason: row.staleness_reason == null ? null : String(row.staleness_reason),
-          relevance_score: Math.min(100, Math.max(0, Number(row.relevance_score ?? 50))),
-          tags: Array.isArray(row.tags) ? row.tags.map((tag) => String(tag)) : [],
-        };
-      })
-      .filter(
-        (item): item is NonNullable<typeof item> =>
-          !!item && Boolean(item.id) && Boolean(item.thesis_id) && Boolean(item.claim),
-      ),
+    evidence_items: evidenceItems,
     missing_info: missingInfoRaw.map((value) => String(value)),
     retrieval_meta: {
       query: String(retrievalMeta.query ?? ""),
