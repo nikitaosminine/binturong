@@ -47,91 +47,8 @@ function toHoursAgo(date: string): number {
   return Math.max(0, diffMs / (1000 * 60 * 60));
 }
 
-function mockInsightsForTheses(theses: Thesis[]): TakeInsight[] {
-  if (theses.length === 0) return [];
-
-  const primary = theses.find((thesis) => thesis.status === "active") ?? theses[0];
-  const secondary =
-    theses.find((thesis) => thesis.id !== primary.id && thesis.status !== "closed") ??
-    theses.find((thesis) => thesis.id !== primary.id) ??
-    primary;
-
-  const templates: Array<Omit<TakeInsight, "thesisId" | "ticker"> & { useSecondary?: boolean }> = [
-    {
-      id: "mock-i1",
-      status: "At risk",
-      headline: "China smartphone shipments down 4.2% YoY",
-      body: "Counterpoint data shows continued share loss in premium tier. Short-term headwind for this thesis leg.",
-      hoursAgo: 2,
-      unread: true,
-    },
-    {
-      id: "mock-i2",
-      status: "Watch",
-      headline: "SaaS multiples compressed to 5.8x NTM revenue",
-      body: "Sector de-rating is accelerating. Monitor for capitulation signals before the next leg lower.",
-      hoursAgo: 4,
-      useSecondary: true,
-    },
-    {
-      id: "mock-i3",
-      status: "Supportive",
-      headline: "Google reports TPU demand outpacing supply",
-      body: "Capex guidance raised with custom silicon driving margin expansion. Aligns with cost-advantage thesis.",
-      hoursAgo: 1,
-      unread: true,
-    },
-    {
-      id: "mock-i4",
-      status: "Supportive",
-      headline: "Anthropic launches enterprise sales agent",
-      body: "New autonomous agent targets CRM workflows directly — reinforces disruption pressure on incumbents.",
-      hoursAgo: 0.2,
-      unread: true,
-      useSecondary: true,
-    },
-    {
-      id: "mock-i5",
-      status: "At risk",
-      headline: "EU construction output fell 3% this month",
-      body: "Works against the cyclical recovery angle. Reassess timing assumptions on this setup.",
-      hoursAgo: 26,
-    },
-    {
-      id: "mock-i6",
-      status: "Neutral",
-      headline: "DOJ remedies hearing pushed to Q2",
-      body: "No material update yet, but timeline shift lowers immediate event risk.",
-      hoursAgo: 30,
-    },
-    {
-      id: "mock-i7",
-      status: "At risk",
-      headline: "Salesforce guides Q4 below consensus",
-      body: "Management cited elongated cycles and higher competition intensity; monitor position risk and timing.",
-      hoursAgo: 80,
-      useSecondary: true,
-    },
-  ];
-
-  return templates.map((template) => {
-    const target = template.useSecondary ? secondary : primary;
-    return {
-      id: template.id,
-      thesisId: target.id,
-      ticker: target.tickers[0] ?? "N/A",
-      status: template.status,
-      source: "market",
-      headline: template.headline,
-      body: template.body,
-      hoursAgo: template.hoursAgo,
-      unread: template.unread,
-    };
-  });
-}
-
 export function insightFromTheses(theses: Thesis[]): TakeInsight[] {
-  const evidenceInsights = theses
+  return theses
     .flatMap((thesis) =>
       thesis.evidence.map((evidence) => ({
         id: evidence.id,
@@ -150,14 +67,6 @@ export function insightFromTheses(theses: Thesis[]): TakeInsight[] {
         unread: toHoursAgo(evidence.date) < 24,
       })),
     )
-    .sort((a, b) => a.hoursAgo - b.hoursAgo);
-
-  if (evidenceInsights.length >= 5) {
-    return evidenceInsights;
-  }
-
-  return [...mockInsightsForTheses(theses), ...evidenceInsights]
-    .filter((insight, index, self) => self.findIndex((item) => item.id === insight.id) === index)
     .sort((a, b) => a.hoursAgo - b.hoursAgo);
 }
 
