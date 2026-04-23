@@ -9,4 +9,21 @@ SUPABASE_URL = "https://sfqowvpuzsqgmwlecgdx.supabase.co"
 # Secrets (set via CLI, not in this file):
 # wrangler secret put SUPABASE_SERVICE_KEY
 # wrangler secret put SUPABASE_ANON_KEY
-# wrangler secret put ANTHROPIC_API_KEY
+# wrangler secret put GROK_MAIN_API_KEY
+# wrangler secret put GROK_SUB_API_KEY
+# wrangler secret put FRED_API_KEY
+# Optional:
+# wrangler secret put MAIN_AGENT_SYSTEM_PROMPT
+# wrangler secret put SUB_AGENT_SYSTEM_PROMPT
+
+[[queues.producers]]
+binding = "AGENT_RUNS_QUEUE"
+queue = "agent-runs"
+
+[[queues.consumers]]
+queue = "agent-runs"
+
+[triggers]
+# Hourly cron for scheduled fanout. Actual per-portfolio run times are selected
+# in code based on user timezone + effective runs/day setting.
+crons = ["5 * * * *"]

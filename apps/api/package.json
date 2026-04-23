@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "cf-typegen": "wrangler types"
+    "cf-typegen": "wrangler types",
+    "eval:agent": "node ./scripts/eval-agent-runs.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.103.3"

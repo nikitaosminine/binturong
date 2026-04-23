@@ -59,12 +59,20 @@ export function TakeInsightCard({
             <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold">
               {insight.ticker}
             </span>
+            <span className="rounded border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              {insight.source === "agent" ? "Agent" : "Market"}
+            </span>
             <span
               className={`flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium ${style.badge}`}
             >
               {style.icon}
               {insight.status}
             </span>
+            {insight.source === "agent" && insight.confidence != null && (
+              <span className="rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
+                {Math.round(insight.confidence)}%
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-2">

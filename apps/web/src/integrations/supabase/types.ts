@@ -14,6 +14,139 @@ export type Database = {
   }
   public: {
     Tables: {
+      agent_portfolio_settings: {
+        Row: {
+          agent_enabled: boolean
+          created_at: string
+          id: string
+          portfolio_id: string
+          runs_per_day_override: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          agent_enabled?: boolean
+          created_at?: string
+          id?: string
+          portfolio_id: string
+          runs_per_day_override?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          agent_enabled?: boolean
+          created_at?: string
+          id?: string
+          portfolio_id?: string
+          runs_per_day_override?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_portfolio_settings_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: true
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_runs: {
+        Row: {
+          created_at: string
+          error_code: string | null
+          error_detail: string | null
+          finished_at: string | null
+          id: string
+          idempotency_key: string
+          model_main: string | null
+          model_sub: string | null
+          portfolio_id: string | null
+          scope_hash: string
+          started_at: string | null
+          status: string
+          token_usage: Json
+          trigger_type: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          error_code?: string | null
+          error_detail?: string | null
+          finished_at?: string | null
+          id?: string
+          idempotency_key: string
+          model_main?: string | null
+          model_sub?: string | null
+          portfolio_id?: string | null
+          scope_hash: string
+          started_at?: string | null
+          status?: string
+          token_usage?: Json
+          trigger_type: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          error_code?: string | null
+          error_detail?: string | null
+          finished_at?: string | null
+          id?: string
+          idempotency_key?: string
+          model_main?: string | null
+          model_sub?: string | null
+          portfolio_id?: string | null
+          scope_hash?: string
+          started_at?: string | null
+          status?: string
+          token_usage?: Json
+          trigger_type?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_runs_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: false
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_user_settings: {
+        Row: {
+          auto_apply_enabled: boolean
+          auto_apply_min_confidence: number
+          created_at: string
+          global_runs_per_day: number
+          timezone: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          auto_apply_enabled?: boolean
+          auto_apply_min_confidence?: number
+          created_at?: string
+          global_runs_per_day?: number
+          timezone?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          auto_apply_enabled?: boolean
+          auto_apply_min_confidence?: number
+          created_at?: string
+          global_runs_per_day?: number
+          timezone?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       holdings: {
         Row: {
           created_at: string

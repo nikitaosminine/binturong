@@ -4,6 +4,13 @@ export interface Env {
   SUPABASE_URL: string;
   SUPABASE_SERVICE_KEY: string;
   SUPABASE_ANON_KEY: string;
+  AGENT_RUNS_QUEUE: Queue<AgentRunQueueMessage>;
+  GROK_MAIN_API_KEY?: string;
+  GROK_SUB_API_KEY?: string;
+  GROK_API_BASE_URL?: string;
+  MAIN_AGENT_SYSTEM_PROMPT?: string;
+  SUB_AGENT_SYSTEM_PROMPT?: string;
+  FRED_API_KEY?: string;
 }
 
 const CORS_HEADERS = {
@@ -105,6 +112,303 @@ interface YahooQuoteSummaryResponse {
       };
     }>;
   };
+}
+
+type AgentRunTriggerType = "scheduled" | "ondemand";
+type AgentRunStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "failed_validation";
+
+interface AgentRunQueueMessage {
+  runId: string;
+  userId: string;
+  portfolioId: string;
+  triggerType: AgentRunTriggerType;
+}
+
+type AgentToolName =
+  | "portfolio_context"
+  | "market_quotes"
+  | "get_ecb_data"
+  | "get_fred_indicator"
+  | "search_news";
+
+interface AgentToolCall {
+  tool: AgentToolName;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  inputSummary: Record<string, unknown>;
+  outputSummary: Record<string, unknown>;
+}
+
+interface AgentRunRow {
+  id: string;
+  user_id: string;
+  portfolio_id: string | null;
+  trigger_type: AgentRunTriggerType;
+  status: AgentRunStatus;
+  idempotency_key: string;
+  scope_hash: string;
+  model_main: string | null;
+  model_sub: string | null;
+  token_usage: Record<string, unknown>;
+  error_code: string | null;
+  error_detail: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface PortfolioContextResult {
+  portfolioId: string;
+  holdings: Array<{
+    ticker: string;
+    name: string;
+    quantity: number;
+  }>;
+  theses: Array<{
+    id: string;
+    title: string;
+    tickers: string[];
+    status: string;
+  }>;
+}
+
+interface MarketQuotesResult {
+  tickers: string[];
+  quotes: Array<{
+    ticker: string;
+    currentPrice: number | null;
+    change1dPercent: number | null;
+    ytdChangePercent: number | null;
+    sector: string;
+  }>;
+}
+
+interface EcbDataResult {
+  dataset: string;
+  observations: Array<{
+    period: string;
+    value: string;
+  }>;
+}
+
+interface FredIndicatorResult {
+  series_id: string;
+  observations: Array<{
+    date: string;
+    value: string;
+  }>;
+}
+
+interface NewsSearchResult {
+  query: string;
+  items: Array<{
+    title: string;
+    link: string;
+  }>;
+}
+
+interface GuardrailState {
+  startedMs: number;
+  totalCalls: number;
+  callsByTool: Record<AgentToolName, number>;
+  maxTotalCalls: number;
+  perToolLimit: number;
+  maxDurationMs: number;
+}
+
+function percentile(values: number[], p: number): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const rank = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1));
+  return sorted[rank] ?? null;
+}
+
+interface AgentRunMetricsSummary {
+  window_hours: number;
+  from_iso: string;
+  total_runs: number;
+  counts_by_status: Record<string, number>;
+  counts_by_trigger: Record<string, number>;
+  queue_depth: number;
+  success_rate: number | null;
+  duration_ms: {
+    samples: number;
+    avg: number | null;
+    p50: number | null;
+    p95: number | null;
+  };
+  failures_with_error_code: Record<string, number>;
+}
+
+function summarizeRunMetrics(
+  rows: Array<{
+    status: string | null;
+    trigger_type: string | null;
+    started_at: string | null;
+    finished_at: string | null;
+    error_code: string | null;
+  }>,
+  options: { hours: number; fromIso: string },
+): AgentRunMetricsSummary {
+  const countsByStatus = rows.reduce<Record<string, number>>((acc, row) => {
+    const key = String(row.status ?? "unknown");
+    acc[key] = (acc[key] ?? 0) + 1;
+    return acc;
+  }, {});
+  const countsByTrigger = rows.reduce<Record<string, number>>((acc, row) => {
+    const key = String(row.trigger_type ?? "unknown");
+    acc[key] = (acc[key] ?? 0) + 1;
+    return acc;
+  }, {});
+  const durationsMs = rows
+    .map((row) => {
+      if (!row.started_at || !row.finished_at) return null;
+      const ms = new Date(row.finished_at).getTime() - new Date(row.started_at).getTime();
+      return Number.isFinite(ms) && ms >= 0 ? ms : null;
+    })
+    .filter((ms): ms is number => ms != null);
+  const completed = countsByStatus.completed ?? 0;
+  const failed = countsByStatus.failed ?? 0;
+  const successRate = completed + failed > 0 ? completed / (completed + failed) : null;
+
+  return {
+    window_hours: options.hours,
+    from_iso: options.fromIso,
+    total_runs: rows.length,
+    counts_by_status: countsByStatus,
+    counts_by_trigger: countsByTrigger,
+    queue_depth: (countsByStatus.queued ?? 0) + (countsByStatus.running ?? 0),
+    success_rate: successRate,
+    duration_ms: {
+      samples: durationsMs.length,
+      avg:
+        durationsMs.length > 0
+          ? Math.round(durationsMs.reduce((sum, ms) => sum + ms, 0) / durationsMs.length)
+          : null,
+      p50: percentile(durationsMs, 50),
+      p95: percentile(durationsMs, 95),
+    },
+    failures_with_error_code: rows
+      .filter((row) => row.status === "failed")
+      .reduce<Record<string, number>>((acc, row) => {
+        const key = String(row.error_code ?? "UNKNOWN");
+        acc[key] = (acc[key] ?? 0) + 1;
+        return acc;
+      }, {}),
+  };
+}
+
+function classifyQueueProcessingError(error: unknown): {
+  retryable: boolean;
+  errorCode: string;
+  failureClass: string;
+  detail: string;
+  statusOverride?: "failed_validation" | "failed";
+} {
+  const detail = error instanceof Error ? error.message : "Unknown queue processing error";
+  if (detail.includes("Model output is not valid JSON")) {
+    return {
+      retryable: false,
+      errorCode: "MODEL_OUTPUT_INVALID_JSON",
+      failureClass: "validation",
+      detail,
+      statusOverride: "failed_validation",
+    };
+  }
+  if (detail.includes("Model output missing required items")) {
+    return {
+      retryable: false,
+      errorCode: "MODEL_OUTPUT_EMPTY",
+      failureClass: "validation",
+      detail,
+      statusOverride: "failed_validation",
+    };
+  }
+  if (detail.includes("Grok API error (4")) {
+    return {
+      retryable: false,
+      errorCode: "UPSTREAM_GROK_4XX",
+      failureClass: "upstream_permanent",
+      detail,
+    };
+  }
+  if (detail.includes("Grok API error (5")) {
+    return {
+      retryable: true,
+      errorCode: "UPSTREAM_GROK_5XX",
+      failureClass: "upstream_transient",
+      detail,
+    };
+  }
+  if (detail.includes("Missing ") || detail.includes("Server misconfiguration")) {
+    return {
+      retryable: false,
+      errorCode: "CONFIGURATION_ERROR",
+      failureClass: "configuration",
+      detail,
+    };
+  }
+  if (detail.includes("Guardrail:")) {
+    return {
+      retryable: false,
+      errorCode: "GUARDRAIL_LIMIT_HIT",
+      failureClass: "guardrail",
+      detail,
+    };
+  }
+  if (detail.includes("Yahoo API error (429")) {
+    return {
+      retryable: true,
+      errorCode: "UPSTREAM_YAHOO_429",
+      failureClass: "upstream_transient",
+      detail,
+    };
+  }
+  return {
+    retryable: true,
+    errorCode: "QUEUE_PROCESSING_ERROR",
+    failureClass: "unknown",
+    detail,
+  };
+}
+
+interface SubAgentOutput {
+  findings: Array<{
+    thesis_id: string;
+    signal_type: "supportive" | "watch" | "at_risk" | "neutral";
+    title: string;
+    explanation: string;
+    relevance_score: number;
+    raw_sources: string[];
+  }>;
+}
+
+interface MainAgentOutput {
+  signals: Array<{
+    thesis_id: string;
+    signal_type: "at_risk" | "supportive" | "watch" | "neutral";
+    title: string;
+    explanation: string;
+    risk_horizon: "short_term" | "long_term" | null;
+    confidence: number;
+  }>;
+  overall_summary: string;
+}
+
+interface GrokChatResponse {
+  choices?: Array<{
+    message?: {
+      content?: string | null;
+    };
+  }>;
 }
 
 function normalizeSectorLabel(value: string | null | undefined): string | null {
@@ -248,6 +552,540 @@ async function getYtdChangePercent(symbol: string): Promise<number | null> {
   }
 }
 
+function buildIdempotencyKey(input: {
+  userId: string;
+  portfolioId: string;
+  triggerType: AgentRunTriggerType;
+  now: Date;
+}): string {
+  const dayWindow = `${input.now.getUTCFullYear()}-${String(input.now.getUTCMonth() + 1).padStart(2, "0")}-${String(input.now.getUTCDate()).padStart(2, "0")}`;
+  if (input.triggerType === "scheduled") {
+    const hourWindow = String(input.now.getUTCHours()).padStart(2, "0");
+    return `${input.userId}:${input.portfolioId}:${input.triggerType}:${dayWindow}T${hourWindow}`;
+  }
+
+  const minuteWindow = `${dayWindow}T${String(input.now.getUTCHours()).padStart(2, "0")}:${String(input.now.getUTCMinutes()).padStart(2, "0")}`;
+  return `${input.userId}:${input.portfolioId}:${input.triggerType}:${minuteWindow}`;
+}
+
+async function createRun(
+  env: Env,
+  params: {
+    userId: string;
+    portfolioId: string;
+    triggerType: AgentRunTriggerType;
+    idempotencyKey?: string;
+  },
+): Promise<AgentRunRow> {
+  const now = new Date();
+  const idempotencyKey =
+    params.idempotencyKey ??
+    buildIdempotencyKey({
+      userId: params.userId,
+      portfolioId: params.portfolioId,
+      triggerType: params.triggerType,
+      now,
+    });
+
+  const payload = {
+    user_id: params.userId,
+    portfolio_id: params.portfolioId,
+    trigger_type: params.triggerType,
+    status: "queued" as const,
+    idempotency_key: idempotencyKey,
+    scope_hash: params.portfolioId,
+    model_main: "grok-4.20-0309-reasoning",
+    model_sub: "grok-4-1-fast-reasoning",
+  };
+
+  const client = db(env);
+  const { data: inserted, error: insertError } = await client
+    .from("agent_runs")
+    .insert(payload)
+    .select("*")
+    .single();
+
+  if (insertError) {
+    if (insertError.code === "23505") {
+      const { data: existing, error: existingError } = await client
+        .from("agent_runs")
+        .select("*")
+        .eq("idempotency_key", idempotencyKey)
+        .single();
+      if (existingError || !existing) {
+        throw new Error(existingError?.message || "Failed to load existing run");
+      }
+      return existing as AgentRunRow;
+    }
+
+    throw new Error(insertError.message);
+  }
+
+  return inserted as AgentRunRow;
+}
+
+async function queueRun(env: Env, run: AgentRunRow): Promise<void> {
+  await env.AGENT_RUNS_QUEUE.send({
+    runId: run.id,
+    userId: run.user_id,
+    portfolioId: run.portfolio_id ?? "",
+    triggerType: run.trigger_type,
+  });
+}
+
+async function listUserPortfolioIds(env: Env, userId: string): Promise<string[]> {
+  const { data, error } = await db(env)
+    .from("portfolios")
+    .select("id")
+    .eq("user_id", userId);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => row.id as string);
+}
+
+function runsPerDayToLocalHours(runsPerDay: number): number[] {
+  if (runsPerDay <= 1) return [8];
+  if (runsPerDay === 2) return [8, 20];
+  return [6, 14, 22];
+}
+
+function getHourInTimezone(now: Date, timezone: string): number {
+  const hour = new Intl.DateTimeFormat("en-GB", {
+    timeZone: timezone,
+    hour: "2-digit",
+    hourCycle: "h23",
+  }).format(now);
+  const parsed = Number.parseInt(hour, 10);
+  if (Number.isNaN(parsed)) return now.getUTCHours();
+  return parsed;
+}
+
+async function runScheduledFanout(
+  env: Env,
+  options: { now: Date; dryRun?: boolean; source: "cron" | "manual" },
+): Promise<{
+  source: "cron" | "manual";
+  dryRun: boolean;
+  checkedPortfolios: number;
+  duePortfolios: number;
+  queuedRuns: number;
+  queuedRunIds: string[];
+}> {
+  if (!env.AGENT_RUNS_QUEUE && !options.dryRun) {
+    throw new Error("Server misconfiguration: AGENT_RUNS_QUEUE binding is missing");
+  }
+
+  const client = db(env);
+  const [{ data: portfolios, error: portfoliosError }, { data: userSettings, error: userSettingsError }, { data: portfolioSettings, error: portfolioSettingsError }] =
+    await Promise.all([
+      client.from("portfolios").select("id,user_id"),
+      client.from("agent_user_settings").select("user_id,timezone,global_runs_per_day"),
+      client
+        .from("agent_portfolio_settings")
+        .select("portfolio_id,user_id,runs_per_day_override,agent_enabled"),
+    ]);
+
+  if (portfoliosError) throw new Error(`scheduled fanout portfolios error: ${portfoliosError.message}`);
+  if (userSettingsError) {
+    throw new Error(`scheduled fanout agent_user_settings error: ${userSettingsError.message}`);
+  }
+  if (portfolioSettingsError) {
+    throw new Error(`scheduled fanout agent_portfolio_settings error: ${portfolioSettingsError.message}`);
+  }
+
+  const userSettingsByUserId = new Map(
+    (userSettings ?? []).map((row) => [
+      String(row.user_id),
+      {
+        timezone: String(row.timezone ?? "Europe/Paris"),
+        globalRunsPerDay: Number(row.global_runs_per_day ?? 2),
+      },
+    ]),
+  );
+  const portfolioSettingsByPortfolioId = new Map(
+    (portfolioSettings ?? []).map((row) => [
+      String(row.portfolio_id),
+      {
+        userId: String(row.user_id),
+        runsPerDayOverride:
+          row.runs_per_day_override == null ? null : Number(row.runs_per_day_override),
+        agentEnabled: row.agent_enabled == null ? true : Boolean(row.agent_enabled),
+      },
+    ]),
+  );
+
+  const dueTargets = (portfolios ?? []).filter((portfolio) => {
+    const portfolioId = String(portfolio.id);
+    const userId = String(portfolio.user_id);
+    const userSetting = userSettingsByUserId.get(userId);
+    const portfolioSetting = portfolioSettingsByPortfolioId.get(portfolioId);
+
+    if (portfolioSetting && !portfolioSetting.agentEnabled) return false;
+
+    const timezone = userSetting?.timezone ?? "Europe/Paris";
+    const runsPerDay = Math.max(
+      1,
+      Math.min(3, portfolioSetting?.runsPerDayOverride ?? userSetting?.globalRunsPerDay ?? 2),
+    );
+    const localHour = getHourInTimezone(options.now, timezone);
+    return runsPerDayToLocalHours(runsPerDay).includes(localHour);
+  });
+
+  if (options.dryRun) {
+    return {
+      source: options.source,
+      dryRun: true,
+      checkedPortfolios: (portfolios ?? []).length,
+      duePortfolios: dueTargets.length,
+      queuedRuns: 0,
+      queuedRunIds: [],
+    };
+  }
+
+  const queuedRunIds: string[] = [];
+  for (const target of dueTargets) {
+    const run = await createRun(env, {
+      userId: String(target.user_id),
+      portfolioId: String(target.id),
+      triggerType: "scheduled",
+    });
+    await queueRun(env, run);
+    queuedRunIds.push(run.id);
+  }
+
+  return {
+    source: options.source,
+    dryRun: false,
+    checkedPortfolios: (portfolios ?? []).length,
+    duePortfolios: dueTargets.length,
+    queuedRuns: queuedRunIds.length,
+    queuedRunIds,
+  };
+}
+
+async function runPortfolioContextTool(
+  env: Env,
+  input: { userId: string; portfolioId: string },
+): Promise<PortfolioContextResult> {
+  const client = db(env);
+  const [{ data: holdings, error: holdingsError }, { data: theses, error: thesesError }] =
+    await Promise.all([
+      client
+        .from("holdings")
+        .select("ticker,name,quantity")
+        .eq("portfolio_id", input.portfolioId)
+        .order("ticker", { ascending: true }),
+      client
+        .from("theses")
+        .select("id,title,tickers,status")
+        .eq("user_id", input.userId)
+        .order("created_at", { ascending: false })
+        .limit(100),
+    ]);
+
+  if (holdingsError) throw new Error(`portfolio_context holdings error: ${holdingsError.message}`);
+  if (thesesError) throw new Error(`portfolio_context theses error: ${thesesError.message}`);
+
+  const portfolioTickers = new Set((holdings ?? []).map((row) => String(row.ticker).toUpperCase()));
+  const filteredTheses = (theses ?? []).filter((row) =>
+    (row.tickers ?? []).some((ticker: string) => portfolioTickers.has(String(ticker).toUpperCase())),
+  );
+
+  return {
+    portfolioId: input.portfolioId,
+    holdings: (holdings ?? []).map((row) => ({
+      ticker: String(row.ticker).toUpperCase(),
+      name: String(row.name ?? row.ticker),
+      quantity: Number(row.quantity ?? 0),
+    })),
+    theses: filteredTheses.map((row) => ({
+      id: String(row.id),
+      title: String(row.title),
+      tickers: (row.tickers ?? []).map((ticker: string) => String(ticker).toUpperCase()),
+      status: String(row.status),
+    })),
+  };
+}
+
+async function runMarketQuotesTool(input: { tickers: string[] }): Promise<MarketQuotesResult> {
+  const dedupedTickers = Array.from(new Set(input.tickers.map((ticker) => ticker.toUpperCase()))).slice(0, 30);
+  if (dedupedTickers.length === 0) {
+    return { tickers: [], quotes: [] };
+  }
+
+  const [quotesBySymbol, ytdChanges, sectorsBySymbol] = await Promise.all([
+    getQuotesResilient(dedupedTickers),
+    Promise.all(dedupedTickers.map((symbol) => getYtdChangePercent(symbol))),
+    getSectorsForSymbols(dedupedTickers),
+  ]);
+
+  return {
+    tickers: dedupedTickers,
+    quotes: dedupedTickers.map((ticker, index) => {
+      const quote = quotesBySymbol[ticker];
+      return {
+        ticker,
+        currentPrice: quote?.currentPrice ?? null,
+        change1dPercent: quote?.change1dPercent ?? null,
+        ytdChangePercent: ytdChanges[index] ?? null,
+        sector: sectorsBySymbol[ticker] ?? quote?.sector ?? "Other",
+      };
+    }),
+  };
+}
+
+async function runEcbDataTool(input: { dataset?: string; lastNObservations?: number }): Promise<EcbDataResult> {
+  const dataset = input.dataset || "FM/B.U2.EUR.4F.KR.MRR_FR.LEV";
+  const url = new URL(`https://data-api.ecb.europa.eu/service/data/${dataset}`);
+  url.searchParams.set("format", "csvdata");
+  url.searchParams.set("lastNObservations", String(input.lastNObservations ?? 2));
+
+  const res = await fetch(url.toString(), {
+    headers: {
+      Accept: "text/csv",
+      "User-Agent": "binturong-trace-agent/1.0",
+    },
+  });
+  if (!res.ok) throw new Error(`get_ecb_data failed (${res.status})`);
+  const text = await res.text();
+  const rows = text.split("\n").filter(Boolean);
+
+  return {
+    dataset,
+    observations: rows.slice(-3).map((row) => {
+      const cols = row.split(",");
+      return {
+        period: cols[cols.length - 2] ?? "",
+        value: cols[cols.length - 1] ?? "",
+      };
+    }),
+  };
+}
+
+async function runFredIndicatorTool(
+  env: Env,
+  input: { series_id: string; limit?: number },
+): Promise<FredIndicatorResult> {
+  if (!env.FRED_API_KEY) {
+    throw new Error("get_fred_indicator requires FRED_API_KEY secret");
+  }
+
+  const url = new URL("https://api.stlouisfed.org/fred/series/observations");
+  url.searchParams.set("series_id", input.series_id);
+  url.searchParams.set("api_key", env.FRED_API_KEY);
+  url.searchParams.set("file_type", "json");
+  url.searchParams.set("sort_order", "desc");
+  url.searchParams.set("limit", String(input.limit ?? 3));
+
+  const data = await fetchJson<{ observations?: Array<{ date?: string; value?: string }> }>(url.toString());
+  return {
+    series_id: input.series_id,
+    observations: (data.observations ?? []).map((row) => ({
+      date: row.date ?? "",
+      value: row.value ?? "",
+    })),
+  };
+}
+
+async function runNewsSearchTool(input: { query: string; limit?: number }): Promise<NewsSearchResult> {
+  const encoded = encodeURIComponent(input.query);
+  const url = `https://news.google.com/rss/search?q=${encoded}`;
+  const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+  if (!res.ok) throw new Error(`search_news failed (${res.status})`);
+  const xml = await res.text();
+  const items = Array.from(xml.matchAll(/<item>[\s\S]*?<title>(.*?)<\/title>[\s\S]*?<link>(.*?)<\/link>[\s\S]*?<\/item>/g))
+    .slice(0, input.limit ?? 6)
+    .map((match) => ({
+      title: match[1]?.replace(/<!\[CDATA\[|\]\]>/g, "") ?? "",
+      link: match[2] ?? "",
+    }));
+
+  return {
+    query: input.query,
+    items,
+  };
+}
+
+function createGuardrailState(): GuardrailState {
+  return {
+    startedMs: Date.now(),
+    totalCalls: 0,
+    callsByTool: {
+      portfolio_context: 0,
+      market_quotes: 0,
+      get_ecb_data: 0,
+      get_fred_indicator: 0,
+      search_news: 0,
+    },
+    maxTotalCalls: 12,
+    perToolLimit: 4,
+    maxDurationMs: 45_000,
+  };
+}
+
+function getGrokBaseUrl(env: Env): string {
+  return (env.GROK_API_BASE_URL || "https://api.x.ai/v1").replace(/\/$/, "");
+}
+
+async function invokeGrok(
+  apiKey: string,
+  model: string,
+  systemPrompt: string,
+  userPrompt: string,
+  env: Env,
+): Promise<string> {
+  const res = await fetch(`${getGrokBaseUrl(env)}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.2,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Grok API error (${res.status}): ${body.slice(0, 400)}`);
+  }
+
+  const data = (await res.json()) as GrokChatResponse;
+  const content = data.choices?.[0]?.message?.content;
+  if (!content) throw new Error("Grok response did not include content");
+  return content;
+}
+
+function extractJsonObject(raw: string): Record<string, unknown> {
+  const trimmed = raw.trim();
+  try {
+    return JSON.parse(trimmed) as Record<string, unknown>;
+  } catch {
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      return JSON.parse(trimmed.slice(start, end + 1)) as Record<string, unknown>;
+    }
+    throw new Error("Model output is not valid JSON");
+  }
+}
+
+function normalizeSubAgentOutput(raw: Record<string, unknown>): SubAgentOutput {
+  const findingsRaw = Array.isArray(raw.findings) ? raw.findings : [];
+  return {
+    findings: findingsRaw
+      .map((item) => {
+        const row = item as Record<string, unknown>;
+        const signalType = String(row.signal_type ?? "neutral");
+        if (!["supportive", "watch", "at_risk", "neutral"].includes(signalType)) return null;
+        return {
+          thesis_id: String(row.thesis_id ?? ""),
+          signal_type: signalType as "supportive" | "watch" | "at_risk" | "neutral",
+          title: String(row.title ?? ""),
+          explanation: String(row.explanation ?? ""),
+          relevance_score: Math.min(100, Math.max(0, Number(row.relevance_score ?? 50))),
+          raw_sources: Array.isArray(row.raw_sources)
+            ? row.raw_sources.map((source) => String(source))
+            : [],
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => !!item),
+  };
+}
+
+function normalizeMainAgentOutput(raw: Record<string, unknown>): MainAgentOutput {
+  const signalsRaw = Array.isArray(raw.signals) ? raw.signals : [];
+  return {
+    signals: signalsRaw
+      .map((item) => {
+        const row = item as Record<string, unknown>;
+        const signalType = String(row.signal_type ?? "neutral");
+        if (!["at_risk", "supportive", "watch", "neutral"].includes(signalType)) return null;
+        const riskHorizon = row.risk_horizon == null ? null : String(row.risk_horizon);
+        return {
+          thesis_id: String(row.thesis_id ?? ""),
+          signal_type: signalType as "at_risk" | "supportive" | "watch" | "neutral",
+          title: String(row.title ?? ""),
+          explanation: String(row.explanation ?? ""),
+          risk_horizon:
+            riskHorizon && ["short_term", "long_term"].includes(riskHorizon)
+              ? (riskHorizon as "short_term" | "long_term")
+              : null,
+          confidence: Math.min(100, Math.max(0, Number(row.confidence ?? 50))),
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => !!item),
+    overall_summary: String(raw.overall_summary ?? ""),
+  };
+}
+
+function assertGuardrails(state: GuardrailState, tool: AgentToolName): void {
+  if (Date.now() - state.startedMs > state.maxDurationMs) {
+    throw new Error("Guardrail: run exceeded max duration");
+  }
+  if (state.totalCalls >= state.maxTotalCalls) {
+    throw new Error("Guardrail: max tool calls exceeded");
+  }
+  if (state.callsByTool[tool] >= state.perToolLimit) {
+    throw new Error(`Guardrail: per-tool call limit exceeded for ${tool}`);
+  }
+}
+
+async function runToolWithGuardrails<TInput, TOutput>(
+  state: GuardrailState,
+  callLog: AgentToolCall[],
+  tool: AgentToolName,
+  input: TInput,
+  runner: (input: TInput) => Promise<TOutput>,
+): Promise<TOutput> {
+  assertGuardrails(state, tool);
+  state.totalCalls += 1;
+  state.callsByTool[tool] += 1;
+
+  const startedAt = new Date().toISOString();
+  const startMs = Date.now();
+  const output = await runner(input);
+  const finishedAt = new Date().toISOString();
+  const durationMs = Date.now() - startMs;
+
+  callLog.push({
+    tool,
+    startedAt,
+    finishedAt,
+    durationMs,
+    inputSummary: {
+      keys: Object.keys((input ?? {}) as Record<string, unknown>),
+    },
+    outputSummary:
+      tool === "portfolio_context"
+        ? {
+            holdings: (output as PortfolioContextResult).holdings.length,
+            theses: (output as PortfolioContextResult).theses.length,
+          }
+        : tool === "market_quotes"
+          ? {
+            quotes: (output as MarketQuotesResult).quotes.length,
+            }
+          : tool === "get_ecb_data"
+            ? {
+                observations: (output as EcbDataResult).observations.length,
+              }
+            : tool === "get_fred_indicator"
+              ? {
+                  observations: (output as FredIndicatorResult).observations.length,
+                }
+              : {
+                  items: (output as NewsSearchResult).items.length,
+                },
+  });
+
+  return output;
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -256,6 +1094,15 @@ export default {
 
     if (method === "OPTIONS") {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
+    }
+
+    if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) {
+      return json(
+        {
+          error: "Server misconfiguration: SUPABASE_URL or SUPABASE_SERVICE_KEY is missing",
+        },
+        500,
+      );
     }
 
     // GET /api/health
@@ -398,6 +1245,586 @@ export default {
       }
     }
 
+    // Agent runs
+    if (pathname === "/api/agent/runs") {
+      if (method === "GET") {
+        const userId = url.searchParams.get("user_id");
+        if (!userId) return json({ error: "user_id is required" }, 400);
+
+        const portfolioId = url.searchParams.get("portfolio_id");
+        let query = db(env)
+          .from("agent_runs")
+          .select("*")
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false })
+          .limit(100);
+
+        if (portfolioId) query = query.eq("portfolio_id", portfolioId);
+        const { data, error } = await query;
+        if (error) return json({ error: error.message }, 500);
+        return json(data);
+      }
+
+      if (method === "POST") {
+        if (!env.AGENT_RUNS_QUEUE) {
+          return json({ error: "Server misconfiguration: AGENT_RUNS_QUEUE binding is missing" }, 500);
+        }
+
+        const body = (await request.json()) as {
+          userId?: string;
+          portfolioId?: string;
+          triggerType?: AgentRunTriggerType;
+          allPortfolios?: boolean;
+          idempotencyKey?: string;
+          forceNew?: boolean;
+        };
+
+        if (!body.userId) return json({ error: "userId is required" }, 400);
+        const triggerType = body.triggerType ?? "ondemand";
+        if (!["scheduled", "ondemand"].includes(triggerType)) {
+          return json({ error: "triggerType must be scheduled or ondemand" }, 400);
+        }
+
+        const portfolioIds = body.allPortfolios
+          ? await listUserPortfolioIds(env, body.userId)
+          : body.portfolioId
+            ? [body.portfolioId]
+            : [];
+
+        if (portfolioIds.length === 0) {
+          return json({ error: "No target portfolios found" }, 400);
+        }
+
+        const runs: AgentRunRow[] = [];
+        for (const portfolioId of portfolioIds) {
+          const run = await createRun(env, {
+            userId: body.userId,
+            portfolioId,
+            triggerType,
+            idempotencyKey: body.forceNew ? crypto.randomUUID() : body.idempotencyKey,
+          });
+          runs.push(run);
+        }
+
+        await Promise.all(runs.map((run) => queueRun(env, run)));
+        return json(
+          {
+            queued: runs.length,
+            runs: runs.map((run) => ({
+              id: run.id,
+              portfolioId: run.portfolio_id,
+              status: run.status,
+              idempotencyKey: run.idempotency_key,
+              createdAt: run.created_at,
+            })),
+          },
+          201,
+        );
+      }
+    }
+
+    if (pathname === "/api/agent/settings") {
+      if (method === "GET") {
+        const userId = url.searchParams.get("user_id");
+        if (!userId) return json({ error: "user_id is required" }, 400);
+
+        const { data, error } = await db(env)
+          .from("agent_user_settings")
+          .select("*")
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (error) return json({ error: error.message }, 500);
+        return json(
+          data ?? {
+            user_id: userId,
+            timezone: "Europe/Paris",
+            global_runs_per_day: 2,
+            auto_apply_enabled: false,
+            auto_apply_min_confidence: 0.8,
+          },
+        );
+      }
+
+      if (method === "PUT") {
+        const body = (await request.json()) as {
+          userId?: string;
+          timezone?: string;
+          globalRunsPerDay?: number;
+          autoApplyEnabled?: boolean;
+          autoApplyMinConfidence?: number;
+        };
+        if (!body.userId) return json({ error: "userId is required" }, 400);
+
+        const payload = {
+          user_id: body.userId,
+          timezone: body.timezone ?? "Europe/Paris",
+          global_runs_per_day: Math.max(1, Math.min(3, Number(body.globalRunsPerDay ?? 2))),
+          auto_apply_enabled: Boolean(body.autoApplyEnabled ?? false),
+          auto_apply_min_confidence: Math.max(
+            0,
+            Math.min(1, Number(body.autoApplyMinConfidence ?? 0.8)),
+          ),
+        };
+
+        const { data, error } = await db(env)
+          .from("agent_user_settings")
+          .upsert(payload, { onConflict: "user_id" })
+          .select("*")
+          .single();
+        if (error) return json({ error: error.message }, 500);
+        return json(data, 200);
+      }
+    }
+
+    if (pathname === "/api/agent/portfolio-settings") {
+      if (method === "GET") {
+        const userId = url.searchParams.get("user_id");
+        if (!userId) return json({ error: "user_id is required" }, 400);
+
+        const { data, error } = await db(env)
+          .from("agent_portfolio_settings")
+          .select("*")
+          .eq("user_id", userId)
+          .order("created_at", { ascending: true });
+        if (error) return json({ error: error.message }, 500);
+        return json(data ?? []);
+      }
+
+      if (method === "PUT") {
+        const body = (await request.json()) as {
+          userId?: string;
+          portfolioId?: string;
+          runsPerDayOverride?: number | null;
+          agentEnabled?: boolean;
+        };
+        if (!body.userId || !body.portfolioId) {
+          return json({ error: "userId and portfolioId are required" }, 400);
+        }
+
+        const payload = {
+          user_id: body.userId,
+          portfolio_id: body.portfolioId,
+          runs_per_day_override:
+            body.runsPerDayOverride == null
+              ? null
+              : Math.max(1, Math.min(3, Number(body.runsPerDayOverride))),
+          agent_enabled: body.agentEnabled == null ? true : Boolean(body.agentEnabled),
+        };
+
+        const { data, error } = await db(env)
+          .from("agent_portfolio_settings")
+          .upsert(payload, { onConflict: "portfolio_id" })
+          .select("*")
+          .single();
+        if (error) return json({ error: error.message }, 500);
+        return json(data, 200);
+      }
+    }
+
+    if (pathname === "/api/agent/metrics") {
+      if (method !== "GET") return json({ error: "Method not allowed" }, 405);
+      const userId = url.searchParams.get("user_id");
+      if (!userId) return json({ error: "user_id is required" }, 400);
+
+      const hours = Math.max(1, Math.min(168, Number(url.searchParams.get("hours") ?? 24)));
+      const fromIso = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+
+      const { data, error } = await db(env)
+        .from("agent_runs")
+        .select("id,status,trigger_type,created_at,started_at,finished_at,error_code")
+        .eq("user_id", userId)
+        .gte("created_at", fromIso)
+        .order("created_at", { ascending: false })
+        .limit(1000);
+      if (error) return json({ error: error.message }, 500);
+
+      return json(summarizeRunMetrics(data ?? [], { hours, fromIso }), 200);
+    }
+
+    if (pathname === "/api/agent/feed") {
+      if (method !== "GET") return json({ error: "Method not allowed" }, 405);
+      const userId = url.searchParams.get("user_id");
+      if (!userId) return json({ error: "user_id is required" }, 400);
+      const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") ?? 50)));
+
+      const { data, error } = await db(env)
+        .from("agent_runs")
+        .select("id,portfolio_id,created_at,token_usage,status,trigger_type")
+        .eq("user_id", userId)
+        .eq("status", "completed")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (error) return json({ error: error.message }, 500);
+
+      const insights = (data ?? [])
+        .flatMap((run) => {
+          const tokenUsage = (run.token_usage ?? {}) as Record<string, unknown>;
+          const main = (tokenUsage.main_agent ?? {}) as Record<string, unknown>;
+          const signals = Array.isArray(main.signals)
+            ? (main.signals as Array<Record<string, unknown>>)
+            : [];
+          return signals.map((signal, index) => {
+            const type = String(signal.signal_type ?? "neutral");
+            const status =
+              type === "at_risk"
+                ? "At risk"
+                : type === "supportive"
+                  ? "Supportive"
+                  : type === "watch"
+                    ? "Watch"
+                    : "Neutral";
+            return {
+              id: `${run.id}:${index}`,
+              run_id: run.id,
+              portfolio_id: run.portfolio_id,
+              created_at: run.created_at,
+              trigger_type: run.trigger_type,
+              source: "agent",
+              thesis_id: String(signal.thesis_id ?? ""),
+              status,
+              headline: String(signal.title ?? "Agent signal"),
+              body: String(signal.explanation ?? ""),
+              confidence: Number(signal.confidence ?? 50),
+              risk_horizon:
+                signal.risk_horizon == null ? null : String(signal.risk_horizon),
+            };
+          });
+        })
+        .slice(0, limit);
+
+      return json({ insights }, 200);
+    }
+
+    if (pathname === "/api/agent/alerts") {
+      if (method !== "GET") return json({ error: "Method not allowed" }, 405);
+      const userId = url.searchParams.get("user_id");
+      if (!userId) return json({ error: "user_id is required" }, 400);
+
+      const hours = Math.max(1, Math.min(168, Number(url.searchParams.get("hours") ?? 24)));
+      const queueDepthThreshold = Math.max(
+        1,
+        Math.min(200, Number(url.searchParams.get("queue_depth_threshold") ?? 5)),
+      );
+      const successRateThreshold = Math.max(
+        0,
+        Math.min(1, Number(url.searchParams.get("success_rate_threshold") ?? 0.9)),
+      );
+      const p95MsThreshold = Math.max(
+        1000,
+        Math.min(60 * 60 * 1000, Number(url.searchParams.get("p95_ms_threshold") ?? 120000)),
+      );
+      const fromIso = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+
+      const { data, error } = await db(env)
+        .from("agent_runs")
+        .select("status,trigger_type,started_at,finished_at,error_code")
+        .eq("user_id", userId)
+        .gte("created_at", fromIso)
+        .order("created_at", { ascending: false })
+        .limit(1000);
+      if (error) return json({ error: error.message }, 500);
+
+      const metrics = summarizeRunMetrics(data ?? [], { hours, fromIso });
+      const alerts = [
+        {
+          key: "queue_depth_high",
+          triggered: metrics.queue_depth >= queueDepthThreshold,
+          value: metrics.queue_depth,
+          threshold: queueDepthThreshold,
+        },
+        {
+          key: "success_rate_low",
+          triggered:
+            metrics.success_rate != null && metrics.success_rate <= successRateThreshold,
+          value: metrics.success_rate,
+          threshold: successRateThreshold,
+        },
+        {
+          key: "p95_latency_high",
+          triggered:
+            metrics.duration_ms.p95 != null && metrics.duration_ms.p95 >= p95MsThreshold,
+          value: metrics.duration_ms.p95,
+          threshold: p95MsThreshold,
+        },
+      ];
+
+      return json(
+        {
+          window_hours: hours,
+          thresholds: {
+            queue_depth_threshold: queueDepthThreshold,
+            success_rate_threshold: successRateThreshold,
+            p95_ms_threshold: p95MsThreshold,
+          },
+          alerts,
+          metrics,
+        },
+        200,
+      );
+    }
+
+    if (pathname === "/api/agent/scheduled/fanout") {
+      if (method !== "POST") return json({ error: "Method not allowed" }, 405);
+
+      const body = (await request.json().catch(() => ({}))) as {
+        dryRun?: boolean;
+        nowIso?: string;
+      };
+      const now = body.nowIso ? new Date(body.nowIso) : new Date();
+      if (Number.isNaN(now.getTime())) {
+        return json({ error: "Invalid nowIso" }, 400);
+      }
+
+      const result = await runScheduledFanout(env, {
+        now,
+        dryRun: Boolean(body.dryRun),
+        source: "manual",
+      });
+      return json(result, 200);
+    }
+
+    const cancelRunMatch = pathname.match(/^\/api\/agent\/runs\/([^/]+)\/cancel$/);
+    if (cancelRunMatch && method === "POST") {
+      const runId = cancelRunMatch[1];
+      const { data, error } = await db(env)
+        .from("agent_runs")
+        .update({
+          status: "cancelled",
+          finished_at: new Date().toISOString(),
+        })
+        .eq("id", runId)
+        .in("status", ["queued", "running"])
+        .select("*")
+        .single();
+      if (error) return json({ error: error.message }, 500);
+      return json(data);
+    }
+
     return json({ error: "Not found" }, 404);
   },
-} satisfies ExportedHandler<Env>;
+  async scheduled(controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
+    try {
+      await runScheduledFanout(env, {
+        now: new Date(controller.scheduledTime),
+        source: "cron",
+      });
+    } catch (error) {
+      console.error("scheduled fanout failed", error);
+    }
+  },
+  async queue(batch: MessageBatch<AgentRunQueueMessage>, env: Env): Promise<void> {
+    for (const message of batch.messages) {
+      const runId = message.body.runId;
+      try {
+        const guardrails = createGuardrailState();
+        const toolCalls: AgentToolCall[] = [];
+        const start = new Date().toISOString();
+        await db(env)
+          .from("agent_runs")
+          .update({ status: "running", started_at: start })
+          .eq("id", runId)
+          .eq("status", "queued");
+
+        const context = await runToolWithGuardrails(
+          guardrails,
+          toolCalls,
+          "portfolio_context",
+          {
+            userId: message.body.userId,
+            portfolioId: message.body.portfolioId,
+          },
+          (input) => runPortfolioContextTool(env, input),
+        );
+
+        const contextTickers = Array.from(
+          new Set([
+            ...context.holdings.map((holding) => holding.ticker),
+            ...context.theses.flatMap((thesis) => thesis.tickers),
+          ]),
+        );
+
+        const quotes = await runToolWithGuardrails(
+          guardrails,
+          toolCalls,
+          "market_quotes",
+          {
+            tickers: contextTickers,
+          },
+          (input) => runMarketQuotesTool(input),
+        );
+
+        const ecbData = await runToolWithGuardrails(
+          guardrails,
+          toolCalls,
+          "get_ecb_data",
+          {
+            dataset: "FM/B.U2.EUR.4F.KR.MRR_FR.LEV",
+            lastNObservations: 2,
+          },
+          (input) => runEcbDataTool(input),
+        );
+
+        const fredData = await runToolWithGuardrails(
+          guardrails,
+          toolCalls,
+          "get_fred_indicator",
+          {
+            series_id: "FEDFUNDS",
+            limit: 3,
+          },
+          (input) => runFredIndicatorTool(env, input),
+        );
+
+        const newsQuery = contextTickers.slice(0, 5).join(" OR ") || "global markets macro";
+        const news = await runToolWithGuardrails(
+          guardrails,
+          toolCalls,
+          "search_news",
+          {
+            query: newsQuery,
+            limit: 6,
+          },
+          (input) => runNewsSearchTool(input),
+        );
+
+        if (!env.GROK_SUB_API_KEY || !env.GROK_MAIN_API_KEY) {
+          throw new Error(
+            "Missing GROK_SUB_API_KEY or GROK_MAIN_API_KEY. Set both secrets before Phase 4 processing.",
+          );
+        }
+
+        const subSystemPrompt =
+          env.SUB_AGENT_SYSTEM_PROMPT ??
+          [
+            "You are a sub-agent market signal analyst.",
+            "Return strict JSON only with keys:",
+            "findings[].",
+            "Each finding: { thesis_id, signal_type, title, explanation, relevance_score, raw_sources }.",
+            "signal_type: supportive|watch|at_risk|neutral.",
+          ].join(" ");
+
+        const subUserPrompt = JSON.stringify(
+          {
+            portfolioId: message.body.portfolioId,
+            holdings: context.holdings,
+            theses: context.theses,
+            quotes: quotes.quotes,
+            ecb_data: ecbData,
+            fred_data: fredData,
+            news_items: news.items,
+          },
+          null,
+          2,
+        );
+
+        const subRaw = await invokeGrok(
+          env.GROK_SUB_API_KEY,
+          "grok-4-1-fast-reasoning",
+          subSystemPrompt,
+          subUserPrompt,
+          env,
+        );
+        const subOutput = normalizeSubAgentOutput(extractJsonObject(subRaw));
+        if (subOutput.findings.length === 0) {
+          throw new Error("Model output missing required items: sub_agent.findings is empty");
+        }
+
+        const mainSystemPrompt =
+          env.MAIN_AGENT_SYSTEM_PROMPT ??
+          [
+            "You are a main thesis impact analyst.",
+            "Return strict JSON only with keys:",
+            "signals, overall_summary.",
+            "Each signal: { thesis_id, signal_type, title, explanation, risk_horizon, confidence }.",
+            "signal_type: at_risk|supportive|watch|neutral.",
+            "risk_horizon: short_term|long_term|null.",
+          ].join(" ");
+
+        const mainUserPrompt = JSON.stringify(
+          {
+            portfolioId: message.body.portfolioId,
+            context: {
+              holdings: context.holdings,
+              theses: context.theses,
+            },
+            sub_agent: subOutput,
+          },
+          null,
+          2,
+        );
+
+        const mainRaw = await invokeGrok(
+          env.GROK_MAIN_API_KEY,
+          "grok-4.20-0309-reasoning",
+          mainSystemPrompt,
+          mainUserPrompt,
+          env,
+        );
+        const mainOutput = normalizeMainAgentOutput(extractJsonObject(mainRaw));
+        if (mainOutput.signals.length === 0) {
+          throw new Error("Model output missing required items: main_agent.signals is empty");
+        }
+
+        await db(env)
+          .from("agent_runs")
+          .update({
+            status: "completed",
+            finished_at: new Date().toISOString(),
+            token_usage: {
+              phase: "phase4_model_orchestration_v1",
+              processed_by: "cloudflare_queue_consumer",
+              guardrails: {
+                maxTotalCalls: guardrails.maxTotalCalls,
+                perToolLimit: guardrails.perToolLimit,
+                maxDurationMs: guardrails.maxDurationMs,
+                callsByTool: guardrails.callsByTool,
+                totalCalls: guardrails.totalCalls,
+                durationMs: Date.now() - guardrails.startedMs,
+              },
+              context: {
+                holdings: context.holdings.length,
+                theses: context.theses.length,
+                tickers: contextTickers.length,
+              },
+              quotes: {
+                count: quotes.quotes.length,
+              },
+              macro: {
+                ecb_observations: ecbData.observations.length,
+                fred_observations: fredData.observations.length,
+              },
+              news: {
+                count: news.items.length,
+                query: news.query,
+              },
+              tool_calls: toolCalls,
+              sub_agent: subOutput,
+              main_agent: mainOutput,
+            },
+          })
+          .eq("id", runId)
+          .neq("status", "cancelled");
+
+        message.ack();
+      } catch (error) {
+        const classified = classifyQueueProcessingError(error);
+        await db(env)
+          .from("agent_runs")
+          .update({
+            status: classified.statusOverride ?? "failed",
+            finished_at: new Date().toISOString(),
+            error_code: classified.errorCode,
+            error_detail: classified.detail,
+            token_usage: {
+              phase: "phase8_failure_classification_v1",
+              failure_class: classified.failureClass,
+              retryable: classified.retryable,
+            },
+          })
+          .eq("id", runId);
+        if (classified.retryable) message.retry();
+        else message.ack();
+      }
+    }
+  },
+} satisfies ExportedHandler<Env, AgentRunQueueMessage>;
