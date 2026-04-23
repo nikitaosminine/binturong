@@ -13,6 +13,9 @@ export interface TakeInsight {
   confidence?: number | null;
   headline: string;
   body: string;
+  deltaSummary?: string | null;
+  questionsForUser?: string[];
+  evidenceIds?: string[];
   hoursAgo: number;
   unread?: boolean;
 }
