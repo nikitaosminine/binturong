@@ -508,35 +508,6 @@ function toConceptQuery(input: { title: string; summary: string; tickers: string
   return input.tickers.slice(0, 3).join(" ");
 }
 
-function normalizeWords(value: string): string[] {
-  return value
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
-    .split(/\s+/)
-    .filter((word) => word.length > 2);
-}
-
-function inferThesisIdForQuery(
-  query: string,
-  thesisPool: Array<{ id: string; descriptor: string }>,
-): string {
-  const queryTerms = new Set(normalizeWords(query));
-  if (queryTerms.size === 0 || thesisPool.length === 0) return "";
-
-  const ranked = thesisPool
-    .map((thesis) => {
-      const thesisTerms = new Set(normalizeWords(thesis.descriptor));
-      let shared = 0;
-      for (const term of queryTerms) {
-        if (thesisTerms.has(term)) shared += 1;
-      }
-      return { id: thesis.id, score: shared };
-    })
-    .sort((a, b) => b.score - a.score);
-
-  return ranked[0]?.score ? ranked[0].id : "";
-}
-
 interface GrokChatResponse {
   choices?: Array<{
     message?: {
@@ -2106,24 +2077,6 @@ export default {
             ...classification,
             signals_to_monitor: defaults,
           };
-        });
-        const thesisDescriptors = context.theses.map((thesis) => ({
-          id: thesis.id,
-          descriptor: `${thesis.title} ${thesis.summary} ${thesis.tickers.join(" ")}`.trim(),
-        }));
-        const fallbackThesisIds = subPass1Output.classifications
-          .map((classification) => classification.thesis_id)
-          .filter(Boolean);
-        let fallbackCursor = 0;
-        subPass1Output.search_queries = subPass1Output.search_queries.map((item) => {
-          if (item.thesis_id) return item;
-          const inferredId = inferThesisIdForQuery(item.query, thesisDescriptors);
-          if (inferredId) return { ...item, thesis_id: inferredId };
-          const fallbackId =
-            fallbackThesisIds.length > 0
-              ? fallbackThesisIds[fallbackCursor++ % fallbackThesisIds.length]!
-              : "";
-          return { ...item, thesis_id: fallbackId };
         });
         subPass1Output.raw_search_queries = subPass1Output.search_queries.map((item) => ({
           thesis_id: item.thesis_id,
