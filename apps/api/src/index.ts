@@ -418,6 +418,17 @@ interface SubAgentOutput {
   };
 }
 
+interface SubAgentPlanningOutput {
+  classifications: Array<{
+    thesis_id: string;
+    established_facts: string[];
+    claims_to_verify: string[];
+    signals_to_monitor: string[];
+    etf_underlying: string | null;
+  }>;
+  search_queries: string[];
+}
+
 interface MainAgentOutput {
   signals: Array<{
     thesis_id: string;
@@ -434,6 +445,34 @@ interface MainAgentOutput {
   }>;
   overall_summary: string;
   questions_for_user: string[];
+}
+
+function normalizeSubAgentPlanningOutput(raw: Record<string, unknown>): SubAgentPlanningOutput {
+  const classificationsRaw = Array.isArray(raw.classifications) ? raw.classifications : [];
+  const searchQueriesRaw = Array.isArray(raw.search_queries) ? raw.search_queries : [];
+  return {
+    classifications: classificationsRaw
+      .map((item) => {
+        const row = item as Record<string, unknown>;
+        const thesisId = String(row.thesis_id ?? "");
+        if (!thesisId) return null;
+        return {
+          thesis_id: thesisId,
+          established_facts: Array.isArray(row.established_facts)
+            ? row.established_facts.map((value) => String(value))
+            : [],
+          claims_to_verify: Array.isArray(row.claims_to_verify)
+            ? row.claims_to_verify.map((value) => String(value))
+            : [],
+          signals_to_monitor: Array.isArray(row.signals_to_monitor)
+            ? row.signals_to_monitor.map((value) => String(value))
+            : [],
+          etf_underlying: row.etf_underlying == null ? null : String(row.etf_underlying),
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => !!item),
+    search_queries: searchQueriesRaw.map((value) => String(value)).filter(Boolean).slice(0, 8),
+  };
 }
 
 interface GrokChatResponse {
@@ -1946,7 +1985,45 @@ export default {
           (input) => runFredIndicatorTool(env, input),
         );
 
-        const newsQuery = contextTickers.slice(0, 5).join(" OR ") || "global markets macro";
+        if (!env.GROK_SUB_API_KEY || !env.GROK_MAIN_API_KEY) {
+          throw new Error(
+            "Missing GROK_SUB_API_KEY or GROK_MAIN_API_KEY. Set both secrets before Phase 4 processing.",
+          );
+        }
+
+        const subPass1SystemPrompt =
+          env.SUB_AGENT_SYSTEM_PROMPT ??
+          [
+            "You are a thesis classification agent.",
+            "Return strict JSON only with keys classifications and search_queries.",
+            "classifications[]: { thesis_id, established_facts, claims_to_verify, signals_to_monitor, etf_underlying }.",
+            "search_queries[] should be concept-driven and grounded in thesis wording.",
+          ].join(" ");
+
+        const subPass1UserPrompt = JSON.stringify(
+          {
+            portfolioId: message.body.portfolioId,
+            thesis_input: context.theses,
+          },
+          null,
+          2,
+        );
+
+        const subPass1Raw = await invokeGrok(
+          env.GROK_SUB_API_KEY,
+          "grok-4-1-fast-reasoning",
+          subPass1SystemPrompt,
+          subPass1UserPrompt,
+          env,
+        );
+        const subPass1Output = normalizeSubAgentPlanningOutput(
+          extractJsonObject(subPass1Raw),
+        );
+
+        const newsQuery =
+          subPass1Output.search_queries.join(" OR ").trim() ||
+          contextTickers.slice(0, 5).join(" OR ") ||
+          "global markets macro";
         let news: NewsSearchResult;
         let webSearchFallbackReason: string | null = null;
         try {
@@ -1977,12 +2054,6 @@ export default {
           );
         }
 
-        if (!env.GROK_SUB_API_KEY || !env.GROK_MAIN_API_KEY) {
-          throw new Error(
-            "Missing GROK_SUB_API_KEY or GROK_MAIN_API_KEY. Set both secrets before Phase 4 processing.",
-          );
-        }
-
         const subSystemPrompt =
           env.SUB_AGENT_SYSTEM_PROMPT ??
           [
@@ -1997,6 +2068,7 @@ export default {
           {
             portfolioId: message.body.portfolioId,
             thesis_input: context.theses,
+            thesis_classification: subPass1Output,
             retrieval_input: {
               holdings: context.holdings,
               quotes: quotes.quotes,
@@ -2129,6 +2201,7 @@ export default {
                   news.provider === "google_rss_fallback" ? webSearchFallbackReason : null,
               },
               tool_calls: toolCalls,
+              classification_stage: subPass1Output,
               evidence_stage: subOutput,
               impact_stage: mainOutput,
               sub_agent: subOutput,
