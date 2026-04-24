@@ -427,9 +427,14 @@ interface SubAgentPlanningOutput {
     signals_to_monitor: string[];
     etf_underlying: string | null;
   }>;
-  search_queries: string[];
-  raw_search_queries?: string[];
-  rewritten_search_queries?: string[];
+  search_queries: Array<{
+    thesis_id: string;
+    query: string;
+  }>;
+  raw_search_queries?: Array<{
+    thesis_id: string;
+    query: string;
+  }>;
 }
 
 interface MainAgentOutput {
@@ -474,7 +479,19 @@ function normalizeSubAgentPlanningOutput(raw: Record<string, unknown>): SubAgent
         };
       })
       .filter((item): item is NonNullable<typeof item> => !!item),
-    search_queries: searchQueriesRaw.map((value) => String(value)).filter(Boolean).slice(0, 8),
+    search_queries: searchQueriesRaw
+      .map((item) => {
+        if (typeof item === "string") {
+          return { thesis_id: "", query: item };
+        }
+        const row = item as Record<string, unknown>;
+        return {
+          thesis_id: String(row.thesis_id ?? ""),
+          query: String(row.query ?? ""),
+        };
+      })
+      .filter((item) => Boolean(item.query))
+      .slice(0, 8),
   };
 }
 
@@ -489,59 +506,6 @@ function toConceptQuery(input: { title: string; summary: string; tickers: string
     .slice(0, 12);
   if (words.length > 0) return words.join(" ");
   return input.tickers.slice(0, 3).join(" ");
-}
-
-function normalizeWords(value: string): string[] {
-  return value
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
-    .split(/\s+/)
-    .filter((word) => word.length > 2);
-}
-
-function jaccardSimilarity(a: string, b: string): number {
-  const setA = new Set(normalizeWords(a));
-  const setB = new Set(normalizeWords(b));
-  if (setA.size === 0 || setB.size === 0) return 0;
-  let intersection = 0;
-  for (const word of setA) {
-    if (setB.has(word)) intersection += 1;
-  }
-  return intersection / (setA.size + setB.size - intersection);
-}
-
-function enforceQueryQuality(
-  query: string,
-  thesisPool: Array<{ title: string; summary: string; tickers: string[] }>,
-): string {
-  const monitorKeywords = ["earnings", "guidance", "policy", "margin", "capex", "demand", "valuation"];
-  const normalized = query.replace(/\s+/g, " ").trim();
-  if (!normalized) return "";
-
-  const closestThesis = thesisPool
-    .map((thesis) => ({
-      thesis,
-      score: jaccardSimilarity(normalized, `${thesis.title} ${thesis.summary}`),
-    }))
-    .sort((a, b) => b.score - a.score)[0]?.thesis;
-
-  let output = normalized;
-  if (closestThesis && jaccardSimilarity(normalized, `${closestThesis.title} ${closestThesis.summary}`) > 0.8) {
-    output = toConceptQuery(closestThesis);
-  }
-
-  if (output.split(" ").length < 5 && closestThesis) {
-    output = `${output} ${toConceptQuery(closestThesis)}`.trim();
-  }
-
-  const hasMonitorKeyword = monitorKeywords.some((keyword) =>
-    normalizeWords(output).includes(keyword),
-  );
-  if (!hasMonitorKeyword) {
-    output = `${output} ${monitorKeywords[0]}`.trim();
-  }
-
-  return output.split(/\s+/).slice(0, 18).join(" ");
 }
 
 interface GrokChatResponse {
@@ -2114,36 +2078,29 @@ export default {
             signals_to_monitor: defaults,
           };
         });
-        subPass1Output.raw_search_queries = [...subPass1Output.search_queries];
+        subPass1Output.raw_search_queries = subPass1Output.search_queries.map((item) => ({
+          thesis_id: item.thesis_id,
+          query: item.query,
+        }));
         if (subPass1Output.search_queries.length === 0) {
           subPass1Output.search_queries = context.theses
-            .map((thesis) =>
-              toConceptQuery({
+            .map((thesis) => ({
+              thesis_id: thesis.id,
+              query: toConceptQuery({
                 title: thesis.title,
                 summary: thesis.summary,
                 tickers: thesis.tickers,
               }),
-            )
-            .filter(Boolean)
+            }))
+            .filter((item) => Boolean(item.query))
             .slice(0, 8);
         }
-        subPass1Output.search_queries = subPass1Output.search_queries
-          .map((query) =>
-            enforceQueryQuality(
-              query,
-              context.theses.map((thesis) => ({
-                title: thesis.title,
-                summary: thesis.summary,
-                tickers: thesis.tickers,
-              })),
-            ),
-          )
-          .filter(Boolean)
-          .slice(0, 8);
-        subPass1Output.rewritten_search_queries = [...subPass1Output.search_queries];
-
         const newsQuery =
-          subPass1Output.search_queries.join(" OR ").trim() ||
+          subPass1Output.search_queries
+            .map((item) => item.query.trim())
+            .filter(Boolean)
+            .join(" OR ")
+            .trim() ||
           contextTickers.slice(0, 5).join(" OR ") ||
           "global markets macro";
         let news: NewsSearchResult;
