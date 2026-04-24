@@ -475,6 +475,19 @@ function normalizeSubAgentPlanningOutput(raw: Record<string, unknown>): SubAgent
   };
 }
 
+function toConceptQuery(input: { title: string; summary: string; tickers: string[] }): string {
+  const base = `${input.title} ${input.summary}`
+    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const words = base
+    .split(" ")
+    .filter((word) => word.length > 2 && !/^[A-Z]{1,5}(\.[A-Z]{1,3})?$/.test(word))
+    .slice(0, 12);
+  if (words.length > 0) return words.join(" ");
+  return input.tickers.slice(0, 3).join(" ");
+}
+
 interface GrokChatResponse {
   choices?: Array<{
     message?: {
@@ -2019,6 +2032,27 @@ export default {
         const subPass1Output = normalizeSubAgentPlanningOutput(
           extractJsonObject(subPass1Raw),
         );
+        if (subPass1Output.classifications.length === 0) {
+          subPass1Output.classifications = context.theses.map((thesis) => ({
+            thesis_id: thesis.id,
+            established_facts: [thesis.title],
+            claims_to_verify: thesis.summary ? [thesis.summary] : [thesis.title],
+            signals_to_monitor: [],
+            etf_underlying: null,
+          }));
+        }
+        if (subPass1Output.search_queries.length === 0) {
+          subPass1Output.search_queries = context.theses
+            .map((thesis) =>
+              toConceptQuery({
+                title: thesis.title,
+                summary: thesis.summary,
+                tickers: thesis.tickers,
+              }),
+            )
+            .filter(Boolean)
+            .slice(0, 8);
+        }
 
         const newsQuery =
           subPass1Output.search_queries.join(" OR ").trim() ||
