@@ -74,6 +74,9 @@ export default function ThesesPage() {
           body: string;
           created_at: string;
           confidence?: number;
+          delta_summary?: string | null;
+          questions_for_user?: string[];
+          evidence_ids?: string[];
         }>;
       };
       const mapped = (payload.insights ?? []).map((insight) => {
@@ -91,6 +94,9 @@ export default function ThesesPage() {
           confidence: insight.confidence ?? null,
           headline: insight.headline,
           body: insight.body,
+          deltaSummary: insight.delta_summary ?? null,
+          questionsForUser: insight.questions_for_user ?? [],
+          evidenceIds: insight.evidence_ids ?? [],
           hoursAgo,
           unread: hoursAgo < 24,
         };

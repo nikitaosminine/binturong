@@ -7,9 +7,11 @@ export interface Env {
   AGENT_RUNS_QUEUE: Queue<AgentRunQueueMessage>;
   GROK_MAIN_API_KEY?: string;
   GROK_SUB_API_KEY?: string;
+  GROK_WEB_SEARCH_MODEL?: string;
   GROK_API_BASE_URL?: string;
   MAIN_AGENT_SYSTEM_PROMPT?: string;
   SUB_AGENT_SYSTEM_PROMPT?: string;
+  SUB_AGENT_PLANNING_SYSTEM_PROMPT?: string;
   FRED_API_KEY?: string;
 }
 
@@ -175,6 +177,11 @@ interface PortfolioContextResult {
   theses: Array<{
     id: string;
     title: string;
+    summary: string;
+    body: unknown;
+    evidence: unknown;
+    horizon: string;
+    conviction: "low" | "med" | "high";
     tickers: string[];
     status: string;
   }>;
@@ -211,8 +218,15 @@ interface NewsSearchResult {
   query: string;
   items: Array<{
     title: string;
-    link: string;
+    url: string;
+    source: string;
+    snippet: string;
+    published_at: string | null;
+    is_stale: boolean;
   }>;
+  provider: "xai_web_search" | "google_rss_fallback";
+  recencyDays: number;
+  totalRetrieved: number;
 }
 
 interface GuardrailState {
@@ -381,13 +395,45 @@ function classifyQueueProcessingError(error: unknown): {
 }
 
 interface SubAgentOutput {
-  findings: Array<{
+  evidence_items: Array<{
+    id: string;
     thesis_id: string;
-    signal_type: "supportive" | "watch" | "at_risk" | "neutral";
-    title: string;
-    explanation: string;
+    claim: string;
+    snippet: string;
+    url: string;
+    source: string;
+    published_at: string | null;
+    is_stale: boolean;
+    staleness_reason: string | null;
     relevance_score: number;
-    raw_sources: string[];
+    tags: string[];
+  }>;
+  missing_info: string[];
+  retrieval_meta: {
+    query: string;
+    provider: "xai_web_search" | "google_rss_fallback";
+    recency_days: number;
+    total_retrieved: number;
+    total_kept: number;
+    total_stale: number;
+  };
+}
+
+interface SubAgentPlanningOutput {
+  classifications: Array<{
+    thesis_id: string;
+    established_facts: string[];
+    claims_to_verify: string[];
+    signals_to_monitor: string[];
+    etf_underlying: string | null;
+  }>;
+  search_queries: Array<{
+    thesis_id: string;
+    query: string;
+  }>;
+  raw_search_queries?: Array<{
+    thesis_id: string;
+    query: string;
   }>;
 }
 
@@ -399,8 +445,96 @@ interface MainAgentOutput {
     explanation: string;
     risk_horizon: "short_term" | "long_term" | null;
     confidence: number;
+    evidence_ids: string[];
+    assumptions: string[];
+    no_evidence_reason: string | null;
+    change_type: "new_information" | "confirmation" | "contradiction" | "no_material_change";
+    delta_summary: string | null;
   }>;
   overall_summary: string;
+  questions_for_user: string[];
+}
+
+function normalizeSubAgentPlanningOutput(raw: Record<string, unknown>): SubAgentPlanningOutput {
+  const classificationsRaw = Array.isArray(raw.classifications) ? raw.classifications : [];
+  const searchQueriesRaw = Array.isArray(raw.search_queries) ? raw.search_queries : [];
+  return {
+    classifications: classificationsRaw
+      .map((item) => {
+        const row = item as Record<string, unknown>;
+        const thesisId = String(row.thesis_id ?? "");
+        if (!thesisId) return null;
+        return {
+          thesis_id: thesisId,
+          established_facts: Array.isArray(row.established_facts)
+            ? row.established_facts.map((value) => String(value))
+            : [],
+          claims_to_verify: Array.isArray(row.claims_to_verify)
+            ? row.claims_to_verify.map((value) => String(value))
+            : [],
+          signals_to_monitor: Array.isArray(row.signals_to_monitor)
+            ? row.signals_to_monitor.map((value) => String(value))
+            : [],
+          etf_underlying: row.etf_underlying == null ? null : String(row.etf_underlying),
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => !!item),
+    search_queries: searchQueriesRaw
+      .map((item) => {
+        if (typeof item === "string") {
+          return { thesis_id: "", query: item };
+        }
+        const row = item as Record<string, unknown>;
+        return {
+          thesis_id: String(row.thesis_id ?? ""),
+          query: String(row.query ?? ""),
+        };
+      })
+      .filter((item) => Boolean(item.query))
+      .slice(0, 8),
+  };
+}
+
+function toConceptQuery(input: { title: string; summary: string; tickers: string[] }): string {
+  const base = `${input.title} ${input.summary}`
+    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const words = base
+    .split(" ")
+    .filter((word) => word.length > 2 && !/^[A-Z]{1,5}(\.[A-Z]{1,3})?$/.test(word))
+    .slice(0, 12);
+  if (words.length > 0) return words.join(" ");
+  return input.tickers.slice(0, 3).join(" ");
+}
+
+function normalizeWords(value: string): string[] {
+  return value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+    .split(/\s+/)
+    .filter((word) => word.length > 2);
+}
+
+function inferThesisIdForQuery(
+  query: string,
+  thesisPool: Array<{ id: string; descriptor: string }>,
+): string {
+  const queryTerms = new Set(normalizeWords(query));
+  if (queryTerms.size === 0 || thesisPool.length === 0) return "";
+
+  const ranked = thesisPool
+    .map((thesis) => {
+      const thesisTerms = new Set(normalizeWords(thesis.descriptor));
+      let shared = 0;
+      for (const term of queryTerms) {
+        if (thesisTerms.has(term)) shared += 1;
+      }
+      return { id: thesis.id, score: shared };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  return ranked[0]?.score ? ranked[0].id : "";
 }
 
 interface GrokChatResponse {
@@ -776,7 +910,7 @@ async function runPortfolioContextTool(
         .order("ticker", { ascending: true }),
       client
         .from("theses")
-        .select("id,title,tickers,status")
+        .select("id,title,summary,body,evidence,horizon,conviction,tickers,status")
         .eq("user_id", input.userId)
         .order("created_at", { ascending: false })
         .limit(100),
@@ -800,6 +934,12 @@ async function runPortfolioContextTool(
     theses: filteredTheses.map((row) => ({
       id: String(row.id),
       title: String(row.title),
+      summary: String(row.summary ?? ""),
+      body: row.body ?? [],
+      evidence: row.evidence ?? [],
+      horizon: String(row.horizon ?? ""),
+      conviction:
+        row.conviction === "low" || row.conviction === "high" ? row.conviction : "med",
       tickers: (row.tickers ?? []).map((ticker: string) => String(ticker).toUpperCase()),
       status: String(row.status),
     })),
@@ -886,8 +1026,134 @@ async function runFredIndicatorTool(
   };
 }
 
-async function runNewsSearchTool(input: { query: string; limit?: number }): Promise<NewsSearchResult> {
+function inferSourceFromUrl(rawUrl: string): string {
+  try {
+    const hostname = new URL(rawUrl).hostname.replace(/^www\./, "");
+    return hostname || "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function parseIsoDateOrNull(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+function isStaleByRecency(publishedAt: string | null, recencyDays: number): boolean {
+  if (!publishedAt) return false;
+  const publishedMs = new Date(publishedAt).getTime();
+  if (!Number.isFinite(publishedMs)) return false;
+  const ageMs = Date.now() - publishedMs;
+  return ageMs > recencyDays * 24 * 60 * 60 * 1000;
+}
+
+async function runWebSearchTool(
+  env: Env,
+  input: { query: string; limit?: number; recencyDays?: number; locale?: string },
+): Promise<NewsSearchResult> {
+  if (!env.GROK_SUB_API_KEY) {
+    throw new Error("Missing GROK_SUB_API_KEY for xAI web search");
+  }
+  const limit = Math.max(1, Math.min(10, Number(input.limit ?? 6)));
+  const recencyDays = Math.max(1, Math.min(365, Number(input.recencyDays ?? 60)));
+  const locale = (input.locale ?? "en-US").trim() || "en-US";
+  const webSearchModel = (env.GROK_WEB_SEARCH_MODEL ?? "grok-4-1-fast-reasoning").trim();
+
+  const body = {
+    model: webSearchModel,
+    input: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: [
+              `Find recent web evidence for query: ${input.query}`,
+              `Locale: ${locale}. Return up to ${limit} results.`,
+              "Return strict JSON only in this format:",
+              '{ "items": [{ "title": "...", "url": "...", "source": "...", "published_at": null, "snippet": "..." }] }',
+              "Do not include markdown.",
+            ].join("\n"),
+          },
+        ],
+      },
+    ],
+    tools: [{ type: "web_search" }],
+  };
+  const res = await fetch(`${getGrokBaseUrl(env)}/responses`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.GROK_SUB_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`xAI web search failed (${res.status}): ${text.slice(0, 200)}`);
+  }
+  const raw = (await res.json()) as Record<string, unknown>;
+  const outputText =
+    typeof raw.output_text === "string"
+      ? raw.output_text
+      : Array.isArray(raw.output)
+        ? (raw.output as Array<Record<string, unknown>>)
+            .flatMap((item) =>
+              Array.isArray(item.content) ? (item.content as Array<Record<string, unknown>>) : [],
+            )
+            .map((content) => String(content.text ?? ""))
+            .join("\n")
+        : "";
+
+  let rows: Array<Record<string, unknown>> = [];
+  try {
+    const parsed = extractJsonObject(outputText);
+    rows = Array.isArray(parsed.items) ? (parsed.items as Array<Record<string, unknown>>) : [];
+  } catch {
+    rows = [];
+  }
+
+  if (rows.length === 0 && Array.isArray(raw.citations)) {
+    rows = (raw.citations as Array<Record<string, unknown>>).map((citation) => ({
+      title: citation.title ?? citation.name ?? "Untitled",
+      url: citation.url ?? citation.link ?? "",
+      source: citation.publisher ?? citation.source ?? null,
+      published_at: citation.published_at ?? citation.date ?? null,
+      snippet: citation.snippet ?? citation.text ?? "",
+    }));
+  }
+
+  const items = rows.slice(0, limit).map((row) => {
+    const url = String(row.url ?? row.link ?? "");
+    const publishedAt = parseIsoDateOrNull(row.published_at ?? row.date ?? row.publishedAt);
+    return {
+      title: String(row.title ?? "Untitled"),
+      url,
+      source: String(row.source ?? row.publisher ?? inferSourceFromUrl(url)),
+      snippet: String(row.snippet ?? row.summary ?? ""),
+      published_at: publishedAt,
+      is_stale: isStaleByRecency(publishedAt, recencyDays),
+    };
+  });
+  if (items.length === 0) {
+    throw new Error("xAI web search returned no parseable items");
+  }
+  return {
+    query: input.query,
+    items,
+    provider: "xai_web_search",
+    recencyDays,
+    totalRetrieved: rows.length || items.length,
+  };
+}
+
+async function runNewsSearchTool(
+  input: { query: string; limit?: number; recencyDays?: number },
+): Promise<NewsSearchResult> {
   const encoded = encodeURIComponent(input.query);
+  const recencyDays = Math.max(1, Math.min(365, Number(input.recencyDays ?? 60)));
   const url = `https://news.google.com/rss/search?q=${encoded}`;
   const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
   if (!res.ok) throw new Error(`search_news failed (${res.status})`);
@@ -896,12 +1162,19 @@ async function runNewsSearchTool(input: { query: string; limit?: number }): Prom
     .slice(0, input.limit ?? 6)
     .map((match) => ({
       title: match[1]?.replace(/<!\[CDATA\[|\]\]>/g, "") ?? "",
-      link: match[2] ?? "",
+      url: match[2] ?? "",
+      source: inferSourceFromUrl(match[2] ?? ""),
+      snippet: "",
+      published_at: null,
+      is_stale: false,
     }));
 
   return {
     query: input.query,
     items,
+    provider: "google_rss_fallback",
+    recencyDays,
+    totalRetrieved: items.length,
   };
 }
 
@@ -975,25 +1248,74 @@ function extractJsonObject(raw: string): Record<string, unknown> {
 }
 
 function normalizeSubAgentOutput(raw: Record<string, unknown>): SubAgentOutput {
+  const evidenceRaw = Array.isArray(raw.evidence_items) ? raw.evidence_items : [];
   const findingsRaw = Array.isArray(raw.findings) ? raw.findings : [];
+  const missingInfoRaw = Array.isArray(raw.missing_info) ? raw.missing_info : [];
+  const retrievalMeta = (raw.retrieval_meta ?? {}) as Record<string, unknown>;
+  const normalizedEvidence = evidenceRaw
+    .map((item) => {
+      const row = item as Record<string, unknown>;
+      const url = String(row.url ?? "");
+      if (!/^https?:\/\//i.test(url)) return null;
+      return {
+        id: String(row.id ?? ""),
+        thesis_id: String(row.thesis_id ?? ""),
+        claim: String(row.claim ?? ""),
+        snippet: String(row.snippet ?? ""),
+        url,
+        source: String(row.source ?? inferSourceFromUrl(url)),
+        published_at: parseIsoDateOrNull(row.published_at),
+        is_stale: Boolean(row.is_stale),
+        staleness_reason: row.staleness_reason == null ? null : String(row.staleness_reason),
+        relevance_score: Math.min(100, Math.max(0, Number(row.relevance_score ?? 50))),
+        tags: Array.isArray(row.tags) ? row.tags.map((tag) => String(tag)) : [],
+      };
+    })
+    .filter(
+      (item): item is NonNullable<typeof item> =>
+        !!item && Boolean(item.id) && Boolean(item.thesis_id) && Boolean(item.claim),
+    );
+
+  const legacyEvidence = findingsRaw
+    .map((item, index) => {
+      const row = item as Record<string, unknown>;
+      const rawSources = Array.isArray(row.raw_sources)
+        ? row.raw_sources.map((source) => String(source))
+        : [];
+      const url = rawSources.find((source) => /^https?:\/\//i.test(source)) ?? "";
+      if (!url) return null;
+      const thesisId = String(row.thesis_id ?? "");
+      const claim = String(row.title ?? row.explanation ?? "");
+      if (!thesisId || !claim) return null;
+      return {
+        id: `${thesisId}:legacy:${index}`,
+        thesis_id: thesisId,
+        claim,
+        snippet: String(row.explanation ?? ""),
+        url,
+        source: inferSourceFromUrl(url),
+        published_at: null,
+        is_stale: false,
+        staleness_reason: "legacy_sub_agent_format",
+        relevance_score: Math.min(100, Math.max(0, Number(row.relevance_score ?? 50))),
+        tags: ["legacy_findings"],
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => !!item);
+
+  const evidenceItems = normalizedEvidence.length > 0 ? normalizedEvidence : legacyEvidence;
   return {
-    findings: findingsRaw
-      .map((item) => {
-        const row = item as Record<string, unknown>;
-        const signalType = String(row.signal_type ?? "neutral");
-        if (!["supportive", "watch", "at_risk", "neutral"].includes(signalType)) return null;
-        return {
-          thesis_id: String(row.thesis_id ?? ""),
-          signal_type: signalType as "supportive" | "watch" | "at_risk" | "neutral",
-          title: String(row.title ?? ""),
-          explanation: String(row.explanation ?? ""),
-          relevance_score: Math.min(100, Math.max(0, Number(row.relevance_score ?? 50))),
-          raw_sources: Array.isArray(row.raw_sources)
-            ? row.raw_sources.map((source) => String(source))
-            : [],
-        };
-      })
-      .filter((item): item is NonNullable<typeof item> => !!item),
+    evidence_items: evidenceItems,
+    missing_info: missingInfoRaw.map((value) => String(value)),
+    retrieval_meta: {
+      query: String(retrievalMeta.query ?? ""),
+      provider:
+        retrievalMeta.provider === "google_rss_fallback" ? "google_rss_fallback" : "xai_web_search",
+      recency_days: Math.max(1, Math.min(365, Number(retrievalMeta.recency_days ?? 60))),
+      total_retrieved: Math.max(0, Number(retrievalMeta.total_retrieved ?? 0)),
+      total_kept: Math.max(0, Number(retrievalMeta.total_kept ?? 0)),
+      total_stale: Math.max(0, Number(retrievalMeta.total_stale ?? 0)),
+    },
   };
 }
 
@@ -1006,6 +1328,13 @@ function normalizeMainAgentOutput(raw: Record<string, unknown>): MainAgentOutput
         const signalType = String(row.signal_type ?? "neutral");
         if (!["at_risk", "supportive", "watch", "neutral"].includes(signalType)) return null;
         const riskHorizon = row.risk_horizon == null ? null : String(row.risk_horizon);
+        const changeTypeRaw = String(row.change_type ?? "new_information");
+        const changeType: "new_information" | "confirmation" | "contradiction" | "no_material_change" =
+          changeTypeRaw === "confirmation" ||
+          changeTypeRaw === "contradiction" ||
+          changeTypeRaw === "no_material_change"
+            ? changeTypeRaw
+            : "new_information";
         return {
           thesis_id: String(row.thesis_id ?? ""),
           signal_type: signalType as "at_risk" | "supportive" | "watch" | "neutral",
@@ -1016,11 +1345,32 @@ function normalizeMainAgentOutput(raw: Record<string, unknown>): MainAgentOutput
               ? (riskHorizon as "short_term" | "long_term")
               : null,
           confidence: Math.min(100, Math.max(0, Number(row.confidence ?? 50))),
+          evidence_ids: Array.isArray(row.evidence_ids)
+            ? row.evidence_ids.map((id) => String(id)).filter(Boolean)
+            : [],
+          assumptions: Array.isArray(row.assumptions)
+            ? row.assumptions.map((assumption) => String(assumption))
+            : [],
+          no_evidence_reason:
+            row.no_evidence_reason == null ? null : String(row.no_evidence_reason),
+          change_type: changeType,
+          delta_summary: row.delta_summary == null ? null : String(row.delta_summary),
         };
       })
       .filter((item): item is NonNullable<typeof item> => !!item),
     overall_summary: String(raw.overall_summary ?? ""),
+    questions_for_user: Array.isArray(raw.questions_for_user)
+      ? raw.questions_for_user.map((question) => String(question))
+      : [],
   };
+}
+
+function validateMainAgentOutput(output: MainAgentOutput): void {
+  for (const signal of output.signals) {
+    if (signal.signal_type !== "neutral" && signal.evidence_ids.length === 0 && !signal.no_evidence_reason) {
+      throw new Error("Model output missing required items: non-neutral signal missing evidence_ids");
+    }
+  }
 }
 
 function assertGuardrails(state: GuardrailState, tool: AgentToolName): void {
@@ -1459,7 +1809,11 @@ export default {
       const insights = (data ?? [])
         .flatMap((run) => {
           const tokenUsage = (run.token_usage ?? {}) as Record<string, unknown>;
-          const main = (tokenUsage.main_agent ?? {}) as Record<string, unknown>;
+          const main = (
+            tokenUsage.impact_stage ??
+            tokenUsage.main_agent ??
+            {}
+          ) as Record<string, unknown>;
           const signals = Array.isArray(main.signals)
             ? (main.signals as Array<Record<string, unknown>>)
             : [];
@@ -1487,9 +1841,27 @@ export default {
               confidence: Number(signal.confidence ?? 50),
               risk_horizon:
                 signal.risk_horizon == null ? null : String(signal.risk_horizon),
+              evidence_ids: Array.isArray(signal.evidence_ids)
+                ? signal.evidence_ids.map((id) => String(id))
+                : [],
+              change_type: String(signal.change_type ?? "new_information"),
+              delta_summary:
+                signal.delta_summary == null ? null : String(signal.delta_summary),
+              questions_for_user: Array.isArray(main.questions_for_user)
+                ? main.questions_for_user.map((question) => String(question))
+                : [],
             };
           });
         })
+        .reduce<Array<Record<string, unknown>>>((acc, insight) => {
+          const thesisId = String(insight.thesis_id ?? "");
+          const prior = acc.find((item) => String(item.thesis_id ?? "") === thesisId);
+          if (String(insight.change_type ?? "") === "no_material_change" && prior) {
+            return acc;
+          }
+          acc.push(insight);
+          return acc;
+        }, [])
         .slice(0, limit);
 
       return json({ insights }, 200);
@@ -1675,43 +2047,165 @@ export default {
           (input) => runFredIndicatorTool(env, input),
         );
 
-        const newsQuery = contextTickers.slice(0, 5).join(" OR ") || "global markets macro";
-        const news = await runToolWithGuardrails(
-          guardrails,
-          toolCalls,
-          "search_news",
-          {
-            query: newsQuery,
-            limit: 6,
-          },
-          (input) => runNewsSearchTool(input),
-        );
-
         if (!env.GROK_SUB_API_KEY || !env.GROK_MAIN_API_KEY) {
           throw new Error(
             "Missing GROK_SUB_API_KEY or GROK_MAIN_API_KEY. Set both secrets before Phase 4 processing.",
           );
         }
 
+        const subPass1SystemPrompt =
+          env.SUB_AGENT_PLANNING_SYSTEM_PROMPT ??
+          [
+            "You are a thesis classification agent.",
+            "Return strict JSON only with keys classifications and search_queries.",
+            "classifications[]: { thesis_id, established_facts, claims_to_verify, signals_to_monitor, etf_underlying }.",
+            "Each classification must include at least 2 concrete signals_to_monitor.",
+            "search_queries[] should be concept-driven and grounded in thesis wording.",
+            "Do not copy thesis title verbatim as the full query.",
+          ].join(" ");
+
+        const subPass1UserPrompt = JSON.stringify(
+          {
+            portfolioId: message.body.portfolioId,
+            thesis_input: context.theses,
+          },
+          null,
+          2,
+        );
+
+        const subPass1Raw = await invokeGrok(
+          env.GROK_SUB_API_KEY,
+          "grok-4-1-fast-reasoning",
+          subPass1SystemPrompt,
+          subPass1UserPrompt,
+          env,
+        );
+        const subPass1Output = normalizeSubAgentPlanningOutput(
+          extractJsonObject(subPass1Raw),
+        );
+        if (subPass1Output.classifications.length === 0) {
+          subPass1Output.classifications = context.theses.map((thesis) => ({
+            thesis_id: thesis.id,
+            established_facts: [thesis.title],
+            claims_to_verify: thesis.summary ? [thesis.summary] : [thesis.title],
+            signals_to_monitor: [],
+            etf_underlying: null,
+          }));
+        }
+        subPass1Output.classifications = subPass1Output.classifications.map((classification) => {
+          if (classification.signals_to_monitor.length >= 2) return classification;
+          const seeds = [
+            ...classification.claims_to_verify,
+            ...classification.established_facts,
+          ]
+            .map((value) => value.trim())
+            .filter(Boolean)
+            .slice(0, 2);
+          const defaults = seeds.length > 0 ? seeds : ["earnings revisions", "policy changes"];
+          return {
+            ...classification,
+            signals_to_monitor: defaults,
+          };
+        });
+        const thesisDescriptors = context.theses.map((thesis) => ({
+          id: thesis.id,
+          descriptor: `${thesis.title} ${thesis.summary} ${thesis.tickers.join(" ")}`.trim(),
+        }));
+        const fallbackThesisIds = subPass1Output.classifications
+          .map((classification) => classification.thesis_id)
+          .filter(Boolean);
+        let fallbackCursor = 0;
+        subPass1Output.search_queries = subPass1Output.search_queries.map((item) => {
+          if (item.thesis_id) return item;
+          const inferredId = inferThesisIdForQuery(item.query, thesisDescriptors);
+          if (inferredId) return { ...item, thesis_id: inferredId };
+          const fallbackId =
+            fallbackThesisIds.length > 0
+              ? fallbackThesisIds[fallbackCursor++ % fallbackThesisIds.length]!
+              : "";
+          return { ...item, thesis_id: fallbackId };
+        });
+        subPass1Output.raw_search_queries = subPass1Output.search_queries.map((item) => ({
+          thesis_id: item.thesis_id,
+          query: item.query,
+        }));
+        if (subPass1Output.search_queries.length === 0) {
+          subPass1Output.search_queries = context.theses
+            .map((thesis) => ({
+              thesis_id: thesis.id,
+              query: toConceptQuery({
+                title: thesis.title,
+                summary: thesis.summary,
+                tickers: thesis.tickers,
+              }),
+            }))
+            .filter((item) => Boolean(item.query))
+            .slice(0, 8);
+        }
+        const newsQuery =
+          subPass1Output.search_queries
+            .map((item) => item.query.trim())
+            .filter(Boolean)
+            .join(" OR ")
+            .trim() ||
+          contextTickers.slice(0, 5).join(" OR ") ||
+          "global markets macro";
+        let news: NewsSearchResult;
+        let webSearchFallbackReason: string | null = null;
+        try {
+          news = await runToolWithGuardrails(
+            guardrails,
+            toolCalls,
+            "search_news",
+            {
+              query: newsQuery,
+              limit: 8,
+              recencyDays: 60,
+              locale: "en-US",
+            },
+            (input) => runWebSearchTool(env, input),
+          );
+        } catch (error) {
+          webSearchFallbackReason = error instanceof Error ? error.message : "xAI web search failed";
+          news = await runToolWithGuardrails(
+            guardrails,
+            toolCalls,
+            "search_news",
+            {
+              query: newsQuery,
+              limit: 8,
+              recencyDays: 60,
+            },
+            (input) => runNewsSearchTool(input),
+          );
+        }
+
         const subSystemPrompt =
           env.SUB_AGENT_SYSTEM_PROMPT ??
           [
-            "You are a sub-agent market signal analyst.",
-            "Return strict JSON only with keys:",
-            "findings[].",
-            "Each finding: { thesis_id, signal_type, title, explanation, relevance_score, raw_sources }.",
-            "signal_type: supportive|watch|at_risk|neutral.",
+            "You are an evidence extraction agent for investment theses.",
+            "Extract external evidence only and never rewrite the user's thesis.",
+            "Return strict JSON only with keys evidence_items, missing_info, retrieval_meta.",
+            "evidence_items[]: { id, thesis_id, claim, snippet, url, source, published_at, is_stale, staleness_reason, relevance_score, tags }.",
+            "Hard rule: no recommendations. Hard rule: every claim must cite url.",
           ].join(" ");
 
         const subUserPrompt = JSON.stringify(
           {
             portfolioId: message.body.portfolioId,
-            holdings: context.holdings,
-            theses: context.theses,
-            quotes: quotes.quotes,
-            ecb_data: ecbData,
-            fred_data: fredData,
-            news_items: news.items,
+            thesis_input: context.theses,
+            thesis_classification: subPass1Output,
+            retrieval_input: {
+              holdings: context.holdings,
+              quotes: quotes.quotes,
+              ecb_data: ecbData,
+              fred_data: fredData,
+              web_results: news.items,
+            },
+            policy: {
+              recency_days: news.recencyDays,
+              stale_rule: "Mark evidence stale when published_at is older than recency_days",
+            },
           },
           null,
           2,
@@ -1725,29 +2219,58 @@ export default {
           env,
         );
         const subOutput = normalizeSubAgentOutput(extractJsonObject(subRaw));
-        if (subOutput.findings.length === 0) {
-          throw new Error("Model output missing required items: sub_agent.findings is empty");
+        if (subOutput.evidence_items.length === 0) {
+          const fallbackEvidence = context.theses
+            .map((thesis, index) => {
+              const source = news.items[index % Math.max(1, news.items.length)];
+              const fallbackUrl = source?.url || "https://news.google.com";
+              return {
+                id: `${thesis.id}:fallback:${index}`,
+                thesis_id: thesis.id,
+                claim:
+                  source?.title ||
+                  `No extractable evidence found for thesis "${thesis.title}" in this run`,
+                snippet:
+                  source?.snippet ||
+                  "Fallback evidence item generated because sub-agent returned no structured evidence.",
+                url: fallbackUrl,
+                source: inferSourceFromUrl(fallbackUrl),
+                published_at: source?.published_at ?? null,
+                is_stale: Boolean(source?.is_stale),
+                staleness_reason: "sub_agent_empty_fallback",
+                relevance_score: 25,
+                tags: ["fallback", "low_confidence"],
+              };
+            })
+            .slice(0, 8);
+          if (fallbackEvidence.length === 0) {
+            throw new Error("Model output missing required items: sub_agent.evidence_items is empty");
+          }
+          subOutput.evidence_items = fallbackEvidence;
+          subOutput.missing_info = [
+            ...subOutput.missing_info,
+            "Sub-agent returned empty evidence_items; fallback evidence synthesized from retrieval inputs.",
+          ];
         }
 
         const mainSystemPrompt =
           env.MAIN_AGENT_SYSTEM_PROMPT ??
           [
-            "You are a main thesis impact analyst.",
-            "Return strict JSON only with keys:",
-            "signals, overall_summary.",
-            "Each signal: { thesis_id, signal_type, title, explanation, risk_horizon, confidence }.",
-            "signal_type: at_risk|supportive|watch|neutral.",
-            "risk_horizon: short_term|long_term|null.",
+            "You are a thesis impact reasoning agent.",
+            "Bridge user thesis intent with extracted external evidence.",
+            "Return strict JSON only with keys: signals, overall_summary, questions_for_user.",
+            "Each signal: { thesis_id, signal_type, title, explanation, risk_horizon, confidence, evidence_ids, assumptions, no_evidence_reason, change_type, delta_summary }.",
+            "Do not treat evidence titles as user thesis text.",
           ].join(" ");
 
         const mainUserPrompt = JSON.stringify(
           {
             portfolioId: message.body.portfolioId,
-            context: {
+            thesis_input: context.theses,
+            portfolio_context: {
               holdings: context.holdings,
-              theses: context.theses,
             },
-            sub_agent: subOutput,
+            evidence_items: subOutput.evidence_items,
           },
           null,
           2,
@@ -1761,6 +2284,7 @@ export default {
           env,
         );
         const mainOutput = normalizeMainAgentOutput(extractJsonObject(mainRaw));
+        validateMainAgentOutput(mainOutput);
         if (mainOutput.signals.length === 0) {
           throw new Error("Model output missing required items: main_agent.signals is empty");
         }
@@ -1771,7 +2295,7 @@ export default {
             status: "completed",
             finished_at: new Date().toISOString(),
             token_usage: {
-              phase: "phase4_model_orchestration_v1",
+              phase: "phase11_evidence_impact_pipeline_v2",
               processed_by: "cloudflare_queue_consumer",
               guardrails: {
                 maxTotalCalls: guardrails.maxTotalCalls,
@@ -1796,8 +2320,16 @@ export default {
               news: {
                 count: news.items.length,
                 query: news.query,
+                provider: news.provider,
+                recency_days: news.recencyDays,
+                total_retrieved: news.totalRetrieved,
+                fallback_reason:
+                  news.provider === "google_rss_fallback" ? webSearchFallbackReason : null,
               },
               tool_calls: toolCalls,
+              classification_stage: subPass1Output,
+              evidence_stage: subOutput,
+              impact_stage: mainOutput,
               sub_agent: subOutput,
               main_agent: mainOutput,
             },
