@@ -1971,7 +1971,37 @@ export default {
         );
         const subOutput = normalizeSubAgentOutput(extractJsonObject(subRaw));
         if (subOutput.evidence_items.length === 0) {
-          throw new Error("Model output missing required items: sub_agent.evidence_items is empty");
+          const fallbackEvidence = context.theses
+            .map((thesis, index) => {
+              const source = news.items[index % Math.max(1, news.items.length)];
+              const fallbackUrl = source?.url || "https://news.google.com";
+              return {
+                id: `${thesis.id}:fallback:${index}`,
+                thesis_id: thesis.id,
+                claim:
+                  source?.title ||
+                  `No extractable evidence found for thesis "${thesis.title}" in this run`,
+                snippet:
+                  source?.snippet ||
+                  "Fallback evidence item generated because sub-agent returned no structured evidence.",
+                url: fallbackUrl,
+                source: inferSourceFromUrl(fallbackUrl),
+                published_at: source?.published_at ?? null,
+                is_stale: Boolean(source?.is_stale),
+                staleness_reason: "sub_agent_empty_fallback",
+                relevance_score: 25,
+                tags: ["fallback", "low_confidence"],
+              };
+            })
+            .slice(0, 8);
+          if (fallbackEvidence.length === 0) {
+            throw new Error("Model output missing required items: sub_agent.evidence_items is empty");
+          }
+          subOutput.evidence_items = fallbackEvidence;
+          subOutput.missing_info = [
+            ...subOutput.missing_info,
+            "Sub-agent returned empty evidence_items; fallback evidence synthesized from retrieval inputs.",
+          ];
         }
 
         const mainSystemPrompt =
