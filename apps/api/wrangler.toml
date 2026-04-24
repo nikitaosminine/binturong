@@ -15,6 +15,7 @@ SUPABASE_URL = "https://sfqowvpuzsqgmwlecgdx.supabase.co"
 # Optional:
 # wrangler secret put MAIN_AGENT_SYSTEM_PROMPT
 # wrangler secret put SUB_AGENT_SYSTEM_PROMPT
+# wrangler secret put GROK_WEB_SEARCH_MODEL
 
 [[queues.producers]]
 binding = "AGENT_RUNS_QUEUE"

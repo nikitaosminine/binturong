@@ -7,6 +7,7 @@ export interface Env {
   AGENT_RUNS_QUEUE: Queue<AgentRunQueueMessage>;
   GROK_MAIN_API_KEY?: string;
   GROK_SUB_API_KEY?: string;
+  GROK_WEB_SEARCH_MODEL?: string;
   GROK_API_BASE_URL?: string;
   MAIN_AGENT_SYSTEM_PROMPT?: string;
   SUB_AGENT_SYSTEM_PROMPT?: string;
@@ -957,9 +958,10 @@ async function runWebSearchTool(
   const limit = Math.max(1, Math.min(10, Number(input.limit ?? 6)));
   const recencyDays = Math.max(1, Math.min(365, Number(input.recencyDays ?? 60)));
   const locale = (input.locale ?? "en-US").trim() || "en-US";
+  const webSearchModel = (env.GROK_WEB_SEARCH_MODEL ?? "grok-4-1-fast-reasoning").trim();
 
   const body = {
-    model: "grok-4.20-reasoning",
+    model: webSearchModel,
     input: [
       {
         role: "user",
