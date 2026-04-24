@@ -94,6 +94,24 @@ export function TakeInsightCard({
 
         <h3 className="mt-2 text-sm font-semibold">{insight.headline}</h3>
         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{insight.body}</p>
+        {insight.deltaSummary && (
+          <p className="mt-1 text-[11px] text-primary/90">What changed: {insight.deltaSummary}</p>
+        )}
+        {insight.questionsForUser && insight.questionsForUser.length > 0 && (
+          <div className="mt-2 rounded-md border border-border/60 bg-muted/30 p-2">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Questions for you</p>
+            <ul className="mt-1 list-disc pl-4 text-[11px] text-foreground/90">
+              {insight.questionsForUser.slice(0, 2).map((question, index) => (
+                <li key={`${question}-${index}`}>{question}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {insight.evidenceIds && insight.evidenceIds.length > 0 && (
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            Evidence links: {insight.evidenceIds.length}
+          </p>
+        )}
 
         {thesis && (
           <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
