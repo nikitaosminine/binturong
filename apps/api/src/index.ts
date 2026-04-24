@@ -959,13 +959,27 @@ async function runWebSearchTool(
   const locale = (input.locale ?? "en-US").trim() || "en-US";
 
   const body = {
-    model: "grok-4-1-fast-reasoning",
-    query: input.query,
-    max_results: limit,
-    recency_days: recencyDays,
-    locale,
+    model: "grok-4.20-reasoning",
+    input: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: [
+              `Find recent web evidence for query: ${input.query}`,
+              `Locale: ${locale}. Return up to ${limit} results.`,
+              "Return strict JSON only in this format:",
+              '{ "items": [{ "title": "...", "url": "...", "source": "...", "published_at": null, "snippet": "..." }] }',
+              "Do not include markdown.",
+            ].join("\n"),
+          },
+        ],
+      },
+    ],
+    tools: [{ type: "web_search" }],
   };
-  const res = await fetch(`${getGrokBaseUrl(env)}/search`, {
+  const res = await fetch(`${getGrokBaseUrl(env)}/responses`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${env.GROK_SUB_API_KEY}`,
@@ -977,8 +991,38 @@ async function runWebSearchTool(
     const text = await res.text();
     throw new Error(`xAI web search failed (${res.status}): ${text.slice(0, 200)}`);
   }
-  const raw = (await res.json()) as { results?: Array<Record<string, unknown>> };
-  const items = (raw.results ?? []).slice(0, limit).map((row) => {
+  const raw = (await res.json()) as Record<string, unknown>;
+  const outputText =
+    typeof raw.output_text === "string"
+      ? raw.output_text
+      : Array.isArray(raw.output)
+        ? (raw.output as Array<Record<string, unknown>>)
+            .flatMap((item) =>
+              Array.isArray(item.content) ? (item.content as Array<Record<string, unknown>>) : [],
+            )
+            .map((content) => String(content.text ?? ""))
+            .join("\n")
+        : "";
+
+  let rows: Array<Record<string, unknown>> = [];
+  try {
+    const parsed = extractJsonObject(outputText);
+    rows = Array.isArray(parsed.items) ? (parsed.items as Array<Record<string, unknown>>) : [];
+  } catch {
+    rows = [];
+  }
+
+  if (rows.length === 0 && Array.isArray(raw.citations)) {
+    rows = (raw.citations as Array<Record<string, unknown>>).map((citation) => ({
+      title: citation.title ?? citation.name ?? "Untitled",
+      url: citation.url ?? citation.link ?? "",
+      source: citation.publisher ?? citation.source ?? null,
+      published_at: citation.published_at ?? citation.date ?? null,
+      snippet: citation.snippet ?? citation.text ?? "",
+    }));
+  }
+
+  const items = rows.slice(0, limit).map((row) => {
     const url = String(row.url ?? row.link ?? "");
     const publishedAt = parseIsoDateOrNull(row.published_at ?? row.date ?? row.publishedAt);
     return {
@@ -990,12 +1034,15 @@ async function runWebSearchTool(
       is_stale: isStaleByRecency(publishedAt, recencyDays),
     };
   });
+  if (items.length === 0) {
+    throw new Error("xAI web search returned no parseable items");
+  }
   return {
     query: input.query,
     items,
     provider: "xai_web_search",
     recencyDays,
-    totalRetrieved: raw.results?.length ?? items.length,
+    totalRetrieved: rows.length || items.length,
   };
 }
 
@@ -1899,6 +1946,7 @@ export default {
 
         const newsQuery = contextTickers.slice(0, 5).join(" OR ") || "global markets macro";
         let news: NewsSearchResult;
+        let webSearchFallbackReason: string | null = null;
         try {
           news = await runToolWithGuardrails(
             guardrails,
@@ -1912,7 +1960,8 @@ export default {
             },
             (input) => runWebSearchTool(env, input),
           );
-        } catch {
+        } catch (error) {
+          webSearchFallbackReason = error instanceof Error ? error.message : "xAI web search failed";
           news = await runToolWithGuardrails(
             guardrails,
             toolCalls,
@@ -2074,6 +2123,8 @@ export default {
                 provider: news.provider,
                 recency_days: news.recencyDays,
                 total_retrieved: news.totalRetrieved,
+                fallback_reason:
+                  news.provider === "google_rss_fallback" ? webSearchFallbackReason : null,
               },
               tool_calls: toolCalls,
               evidence_stage: subOutput,
