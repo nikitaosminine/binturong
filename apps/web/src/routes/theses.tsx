@@ -245,10 +245,18 @@ export default function ThesesPage() {
             <div>
               <h2 className="flex items-center gap-2 text-lg font-semibold">
                 Trace feed
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0" aria-hidden="true">
-                  <path d="M8 1L9.5 6H14.5L10.5 9L12 14L8 11L4 14L5.5 9L1.5 6H6.5L8 1Z" fill="var(--accent-teal)" fillOpacity="0.9"/>
-                  <circle cx="13" cy="3" r="1.5" fill="var(--accent-teal)" fillOpacity="0.6"/>
-                  <circle cx="3" cy="12" r="1" fill="var(--accent-teal)" fillOpacity="0.5"/>
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0" aria-hidden="true">
+                  <defs>
+                    <filter id="bisect-glow" x="-50%" y="-50%" width="200%" height="200%">
+                      <feGaussianBlur stdDeviation="1.4" result="blur"/>
+                      <feMerge>
+                        <feMergeNode in="blur"/>
+                        <feMergeNode in="SourceGraphic"/>
+                      </feMerge>
+                    </filter>
+                  </defs>
+                  <circle cx="9" cy="9" r="5.5" fill="white" fillOpacity="0.92" filter="url(#bisect-glow)"/>
+                  <line x1="9" y1="0" x2="9" y2="18" stroke="var(--background)" strokeWidth="1.2"/>
                 </svg>
               </h2>
               <p className="text-xs text-muted-foreground">
