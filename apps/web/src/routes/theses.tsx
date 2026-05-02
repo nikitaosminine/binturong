@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Plus, Sparkles, X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { useOutletContext } from "react-router-dom";
 import { Thesis } from "@/lib/thesis";
 import { useAuth } from "@/hooks/use-auth";
@@ -190,7 +190,7 @@ export default function ThesesPage() {
       <PrimaryTabs />
       <div className="mx-auto max-w-[1500px] px-6 pb-8 pt-4">
     <div className="w-full space-y-6">
-      <div className="grid grid-cols-1 items-end border-b border-hairline pb-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+      <div className="grid grid-cols-1 items-end border-b border-hairline pb-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
         <div className="space-y-4">
           <TakePageHeader />
           <div className="flex justify-end">
@@ -203,7 +203,7 @@ export default function ThesesPage() {
         <div className="hidden xl:block" />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
         <section className="rounded-xl border border-border/50 bg-card p-4">
           <TakeKpiSummary
             theses={theses}
@@ -244,8 +244,12 @@ export default function ThesesPage() {
           <div className="mb-4 flex items-start justify-between">
             <div>
               <h2 className="flex items-center gap-2 text-lg font-semibold">
-                <Sparkles className="h-4 w-4 text-primary" />
                 Trace feed
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0" aria-hidden="true">
+                  <path d="M8 1L9.5 6H14.5L10.5 9L12 14L8 11L4 14L5.5 9L1.5 6H6.5L8 1Z" fill="var(--accent-teal)" fillOpacity="0.9"/>
+                  <circle cx="13" cy="3" r="1.5" fill="var(--accent-teal)" fillOpacity="0.6"/>
+                  <circle cx="3" cy="12" r="1" fill="var(--accent-teal)" fillOpacity="0.5"/>
+                </svg>
               </h2>
               <p className="text-xs text-muted-foreground">
                 Signals mapped to your theses — review and act with context.
