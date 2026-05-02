@@ -36,7 +36,7 @@ export function AllocationStackedBar({ title, subtitle, data }: Props) {
               style={{ width: `${pct}%`, background: PALETTE[i % PALETTE.length], color: "oklch(0.16 0.012 240)" }}
               title={`${d.name} · ${pct.toFixed(1)}%`}
             >
-              {pct >= 12 ? `${pct.toFixed(1)}%` : null}
+              {pct >= 6 ? `${pct.toFixed(1)}%` : null}
             </div>
           );
         })}

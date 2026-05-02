@@ -123,7 +123,7 @@ export function PortfolioChart({ data }: PortfolioChartProps) {
                     year: "numeric",
                   })
                 }
-                formatter={(value: unknown) => [fmt$(value as number), "Portfolio value"]}
+                formatter={(value: unknown) => [fmt$(value as number), ""]}
                 indicator="dot"
               />
             }

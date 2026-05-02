@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Link, useParams, useOutletContext } from "react-router-dom";
-import { ArrowLeft, ArrowDown, ArrowUp, Copy, Minus, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowDown, ArrowUp, Check, Copy, Minus, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { getSector } from "@/lib/mock-data";
@@ -189,6 +189,7 @@ function PerfCell({ value, money }: { value: number; money?: boolean }) {
 export default function PortfolioDetailPage() {
   const { portfolioId } = useParams<{ portfolioId: string }>();
   const { theses, openDrawer, openModal } = useOutletContext<ThesisContext>();
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [portfolio, setPortfolio] = useState<{
     id: string;
     name: string;
@@ -443,14 +444,15 @@ export default function PortfolioDetailPage() {
     }
   };
 
-  const copyIsin = async (isin: string | null) => {
+  const copyIsin = async (rowId: string, isin: string | null) => {
     if (!isin) {
       toast.error("No ISIN available for this holding");
       return;
     }
     try {
       await navigator.clipboard.writeText(isin);
-      toast.success("ISIN copied");
+      setCopiedId(rowId);
+      setTimeout(() => setCopiedId(null), 2000);
     } catch {
       toast.error("Failed to copy ISIN");
     }
@@ -645,30 +647,6 @@ export default function PortfolioDetailPage() {
               </colgroup>
               <thead>
                 <tr className="text-[10px] uppercase tracking-[0.1em] text-foreground-muted">
-                  <th
-                    colSpan={5}
-                    className="border-b border-hairline/60 px-5 py-2 text-left font-medium"
-                  >
-                    Position
-                  </th>
-                  <th
-                    colSpan={2}
-                    className="border-b border-hairline/60 border-l border-l-hairline/60 px-3 py-2 text-right font-medium"
-                  >
-                    Allocation
-                  </th>
-                  <th
-                    colSpan={3}
-                    className="border-b border-hairline/60 border-l border-l-hairline/60 px-3 py-2 text-center font-medium"
-                  >
-                    Performance
-                  </th>
-                  <th className="border-b border-hairline/60 border-l border-l-hairline/60 px-5 py-2 text-right font-medium">
-                    Take
-                  </th>
-                  <th className="border-b border-hairline/60 px-2 py-2" />
-                </tr>
-                <tr className="text-[10px] uppercase tracking-[0.1em] text-foreground-muted">
                   {visibleCols.map((key) => {
                     const col = ALL_COLUMNS.find((c) => c.key === key)!;
                     const active = sortBy === key;
@@ -768,15 +746,23 @@ export default function PortfolioDetailPage() {
                                         <Button
                                           variant="ghost"
                                           size="icon"
-                                          className="h-8 w-8 rounded-md border border-hairline bg-surface-2 text-foreground-muted"
-                                          onClick={() => copyIsin(r.isin)}
+                                          className={`h-8 w-8 rounded-md border border-hairline bg-surface-2 transition-colors ${
+                                            copiedId === r.id
+                                              ? "border-accent-teal/40 text-accent-teal"
+                                              : "text-foreground-muted"
+                                          }`}
+                                          onClick={() => copyIsin(r.id, r.isin)}
                                           aria-label="Copy ISIN"
                                         >
-                                          <Copy className="h-3.5 w-3.5" />
+                                          {copiedId === r.id ? (
+                                            <Check className="h-3.5 w-3.5" />
+                                          ) : (
+                                            <Copy className="h-3.5 w-3.5" />
+                                          )}
                                         </Button>
                                       </TooltipTrigger>
                                       <TooltipContent>
-                                        <p>{r.isin ? "Copy ISIN" : "No ISIN"}</p>
+                                        <p>{copiedId === r.id ? "Copied!" : r.isin ? "Copy ISIN" : "No ISIN"}</p>
                                       </TooltipContent>
                                     </Tooltip>
                                   </TooltipProvider>

@@ -53,6 +53,7 @@ function TreemapNode(props: ContentProps) {
           fill="oklch(0.16 0.012 240)"
           fontSize={11}
           fontWeight={600}
+          fontFamily="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
           style={{ pointerEvents: "none" }}
         >
           {name}
@@ -61,12 +62,13 @@ function TreemapNode(props: ContentProps) {
       {showPct && (
         <text
           x={x + 10}
-          y={y + (showLabel ? 33 : 18)}
+          y={y + (showLabel ? 32 : 18)}
           fill="oklch(0.16 0.012 240)"
           fontSize={10}
-          fillOpacity={0.75}
+          fontWeight={500}
+          fontFamily="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+          fillOpacity={0.8}
           style={{ pointerEvents: "none" }}
-          className="tabular-nums"
         >
           {pct.toFixed(1)}%
         </text>
