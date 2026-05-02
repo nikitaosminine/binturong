@@ -45,6 +45,11 @@ const FEED_FILTERS: ("All" | InsightStatus)[] = [
   "Watch",
   "Neutral",
 ];
+
+type PeriodFilter = "All" | "Last week" | "Last month";
+const PERIOD_FILTERS: PeriodFilter[] = ["All", "Last week", "Last month"];
+
+type SortOrder = "desc" | "asc";
 const API_BASE_URL =
   import.meta.env.VITE_API_URL ??
   "https://binturong-api.nikita-osminine.workers.dev";
@@ -56,6 +61,8 @@ export default function ThesesPage() {
   const [search, setSearch] = useState("");
   const [feedFilter, setFeedFilter] = useState<"All" | InsightStatus>("All");
   const [sourceFilter, setSourceFilter] = useState<"all" | "agent" | "market">("all");
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>("All");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [selectedThesis, setSelectedThesis] = useState<string | null>(null);
   const [selectedInsight, setSelectedInsight] = useState<string | null>(null);
@@ -128,12 +135,16 @@ export default function ThesesPage() {
       list = list.filter((insight) => insight.thesisId === selectedThesis);
     }
 
-    return list.sort((a, b) => {
-      const thesisA = theses.find((thesis) => thesis.id === a.thesisId);
-      const thesisB = theses.find((thesis) => thesis.id === b.thesisId);
-      return rankScore(b, thesisB) - rankScore(a, thesisA);
-    });
-  }, [dismissed, feedFilter, insights, selectedThesis, sourceFilter, theses]);
+    if (periodFilter === "Last week") {
+      list = list.filter((insight) => insight.hoursAgo <= 168);
+    } else if (periodFilter === "Last month") {
+      list = list.filter((insight) => insight.hoursAgo <= 720);
+    }
+
+    return list.sort((a, b) =>
+      sortOrder === "desc" ? a.hoursAgo - b.hoursAgo : b.hoursAgo - a.hoursAgo,
+    );
+  }, [dismissed, feedFilter, insights, periodFilter, selectedThesis, sortOrder, sourceFilter]);
 
   const groupedInsights = useMemo(() => {
     const map = new Map<DateBucket, typeof visibleInsights>();
@@ -283,35 +294,92 @@ export default function ThesesPage() {
             </div>
           )}
 
-          <div className="mb-3 flex flex-wrap gap-1.5">
-            {FEED_FILTERS.map((status) => (
+          <div className="mb-3 flex flex-wrap items-center gap-3">
+            {/* Sentiment */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-foreground-muted">Sentiment</span>
+              <div className="flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
+                {FEED_FILTERS.map((status) => (
+                  <button
+                    key={status}
+                    onClick={() => setFeedFilter(status)}
+                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                      feedFilter === status
+                        ? "bg-accent-teal text-primary-foreground"
+                        : "text-foreground-muted hover:text-foreground"
+                    }`}
+                  >
+                    {status}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Source */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-foreground-muted">Source</span>
+              <div className="flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
+                {(["all", "agent", "market"] as const).map((source) => (
+                  <button
+                    key={source}
+                    onClick={() => setSourceFilter(source)}
+                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                      sourceFilter === source
+                        ? "bg-accent-teal text-primary-foreground"
+                        : "text-foreground-muted hover:text-foreground"
+                    }`}
+                  >
+                    {source === "all" ? "All" : source === "agent" ? "Agent" : "Market"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Period */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-foreground-muted">Period</span>
+              <div className="flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
+                {PERIOD_FILTERS.map((period) => (
+                  <button
+                    key={period}
+                    onClick={() => setPeriodFilter(period)}
+                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                      periodFilter === period
+                        ? "bg-accent-teal text-primary-foreground"
+                        : "text-foreground-muted hover:text-foreground"
+                    }`}
+                  >
+                    {period}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Sort order */}
+            <div className="ml-auto flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
               <button
-                key={status}
-                onClick={() => setFeedFilter(status)}
-                className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
-                  feedFilter === status
-                    ? "border-primary/40 bg-primary/15 text-primary"
-                    : "border-border/50 bg-muted/40 text-muted-foreground hover:text-foreground"
+                onClick={() => setSortOrder("desc")}
+                className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                  sortOrder === "desc"
+                    ? "bg-accent-teal text-primary-foreground"
+                    : "text-foreground-muted hover:text-foreground"
                 }`}
+                title="Newest first"
               >
-                {status}
+                ↓ Newest
               </button>
-            ))}
-          </div>
-          <div className="mb-3 flex flex-wrap gap-1.5">
-            {(["all", "agent", "market"] as const).map((source) => (
               <button
-                key={source}
-                onClick={() => setSourceFilter(source)}
-                className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
-                  sourceFilter === source
-                    ? "border-primary/40 bg-primary/15 text-primary"
-                    : "border-border/50 bg-muted/40 text-muted-foreground hover:text-foreground"
+                onClick={() => setSortOrder("asc")}
+                className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                  sortOrder === "asc"
+                    ? "bg-accent-teal text-primary-foreground"
+                    : "text-foreground-muted hover:text-foreground"
                 }`}
+                title="Oldest first"
               >
-                {source === "all" ? "All sources" : source === "agent" ? "Agent" : "Market"}
+                ↑ Oldest
               </button>
-            ))}
+            </div>
           </div>
 
           {groupedInsights.length > 1 && (
