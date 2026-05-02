@@ -242,6 +242,10 @@ export default function PortfolioDetailPage() {
   }, [portfolioId]);
 
   useEffect(() => {
+    if (portfolioId) localStorage.setItem("binturong.last-portfolio-id", portfolioId);
+  }, [portfolioId]);
+
+  useEffect(() => {
     saveLS(`binturong.columns.hidden.${portfolioId}`, Array.from(hiddenCols));
   }, [hiddenCols, portfolioId]);
 

@@ -3,24 +3,28 @@ import { NotebookText, Wallet } from "lucide-react";
 import type { ReactNode } from "react";
 
 type Tab = {
-  to: string;
   label: string;
   icon: ReactNode;
   match: (pathname: string) => boolean;
+  href: (pathname: string) => string;
 };
 
 const TABS: Tab[] = [
   {
-    to: "/portfolios",
     label: "Portfolio",
     icon: <Wallet className="h-4 w-4" />,
     match: (p) => p.startsWith("/portfolios"),
+    href: (p) => {
+      if (p.startsWith("/portfolios/")) return p;
+      const saved = localStorage.getItem("binturong.last-portfolio-id");
+      return saved ? `/portfolios/${saved}` : "/portfolios";
+    },
   },
   {
-    to: "/the-take",
     label: "The Take",
     icon: <NotebookText className="h-4 w-4" />,
     match: (p) => p.startsWith("/the-take"),
+    href: () => "/the-take",
   },
 ];
 
@@ -34,8 +38,8 @@ export function PrimaryTabs() {
           const active = t.match(pathname);
           return (
             <Link
-              key={t.to}
-              to={t.to}
+              key={t.label}
+              to={t.href(pathname)}
               className={`relative flex items-center gap-2 px-3 py-3 text-sm font-medium transition-colors ${
                 active ? "text-foreground" : "text-foreground-muted hover:text-foreground"
               }`}
