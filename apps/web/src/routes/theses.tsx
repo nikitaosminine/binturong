@@ -401,7 +401,7 @@ export default function ThesesPage() {
 
           <div
             ref={feedRef}
-            className="take-scrollbar flex max-h-[calc(100vh-320px)] flex-col gap-3 overflow-y-auto pr-1"
+            className="take-scrollbar flex flex-col gap-3 pr-1"
           >
             {groupedInsights.length === 0 && (
               <div className="rounded-lg border border-dashed border-border/50 p-8 text-center text-xs text-muted-foreground">
