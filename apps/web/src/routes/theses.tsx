@@ -9,6 +9,7 @@ import { TakeToolbar, FilterTab } from "@/components/take/take-toolbar";
 import { TakeThesisCard } from "@/components/take/take-thesis-card";
 import { TakeInsightCard } from "@/components/take/take-insight-card";
 import { TakeKpiSummary } from "@/components/take/take-kpi-summary";
+import { PrimaryTabs } from "@/components/primary-tabs";
 import {
   BUCKET_ORDER,
   DateBucket,
@@ -185,8 +186,11 @@ export default function ThesesPage() {
   };
 
   return (
+    <div className="min-h-screen bg-background text-foreground">
+      <PrimaryTabs />
+      <div className="mx-auto max-w-[1500px] px-6 pb-8 pt-4">
     <div className="w-full space-y-6">
-      <div className="grid grid-cols-1 items-end border-b border-border/50 pb-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+      <div className="grid grid-cols-1 items-end border-b border-hairline pb-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         <div className="space-y-4">
           <TakePageHeader />
           <div className="flex justify-end">
@@ -366,6 +370,8 @@ export default function ThesesPage() {
             ))}
           </div>
         </section>
+      </div>
+    </div>
       </div>
     </div>
   );
