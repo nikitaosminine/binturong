@@ -48,14 +48,18 @@ export function TakeInsightCard({
     <article
       onClick={onSelect}
       className={`group relative cursor-pointer overflow-hidden rounded-lg border transition-all ${
-        selected ? "border-primary/50 bg-primary/5" : "border-border/50 bg-card hover:border-border"
+        selected
+          ? "border-foreground/40 bg-foreground/5"
+          : "border-border/50 bg-card hover:border-border"
       }`}
     >
       <div className={`absolute left-0 top-0 h-full w-1 ${style.bar}`} />
       <div className="p-3 pl-4">
         <div className="flex items-start justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
-            {insight.unread && <span className="h-1.5 w-1.5 rounded-full bg-primary" title="New" />}
+            {insight.unread && (
+              <span className="h-1.5 w-1.5 rounded-full bg-foreground" title="New" />
+            )}
             <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold">
               {insight.ticker}
             </span>
@@ -69,7 +73,7 @@ export function TakeInsightCard({
               {insight.status}
             </span>
             {insight.source === "agent" && insight.confidence != null && (
-              <span className="rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
+              <span className="rounded border border-foreground/20 bg-foreground/10 px-1.5 py-0.5 text-[10px] text-foreground">
                 {Math.round(insight.confidence)}%
               </span>
             )}
@@ -103,11 +107,15 @@ export function TakeInsightCard({
           <>
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{insight.body}</p>
             {insight.deltaSummary && (
-              <p className="mt-1 text-[11px] text-primary/90">What changed: {insight.deltaSummary}</p>
+              <p className="mt-1 text-[11px] text-foreground/80">
+                What changed: {insight.deltaSummary}
+              </p>
             )}
             {insight.questionsForUser && insight.questionsForUser.length > 0 && (
               <div className="mt-2 rounded-md border border-border/60 bg-muted/30 p-2">
-                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Questions for you</p>
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  Questions for you
+                </p>
                 <ul className="mt-1 list-disc pl-4 text-[11px] text-foreground/90">
                   {insight.questionsForUser.slice(0, 2).map((question, index) => (
                     <li key={`${question}-${index}`}>{question}</li>

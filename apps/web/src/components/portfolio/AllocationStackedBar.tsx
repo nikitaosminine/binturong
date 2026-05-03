@@ -15,6 +15,15 @@ const PALETTE = [
   "var(--alloc-6)",
 ];
 
+const TEXT_PALETTE = [
+  "var(--alloc-1-text)",
+  "var(--alloc-2-text)",
+  "var(--alloc-3-text)",
+  "var(--alloc-4-text)",
+  "var(--alloc-5-text)",
+  "var(--alloc-6-text)",
+];
+
 export function AllocationStackedBar({ title, subtitle, data }: Props) {
   const total = data.reduce((s, d) => s + d.value, 0) || 1;
   const sorted = [...data].sort((a, b) => b.value - a.value);
@@ -33,7 +42,11 @@ export function AllocationStackedBar({ title, subtitle, data }: Props) {
             <div
               key={d.name}
               className="relative flex items-center justify-center text-[11px] font-medium tabular-nums transition-all"
-              style={{ width: `${pct}%`, background: PALETTE[i % PALETTE.length], color: "oklch(0.16 0.012 240)" }}
+              style={{
+                width: `${pct}%`,
+                background: PALETTE[i % PALETTE.length],
+                color: TEXT_PALETTE[i % TEXT_PALETTE.length],
+              }}
               title={`${d.name} · ${pct.toFixed(1)}%`}
             >
               {pct >= 6 ? `${pct.toFixed(1)}%` : null}
@@ -48,7 +61,10 @@ export function AllocationStackedBar({ title, subtitle, data }: Props) {
           return (
             <li key={d.name} className="flex items-center justify-between gap-3">
               <span className="flex min-w-0 items-center gap-2">
-                <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: PALETTE[i % PALETTE.length] }} />
+                <span
+                  className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                  style={{ background: PALETTE[i % PALETTE.length] }}
+                />
                 <span className="truncate text-foreground">{d.name}</span>
               </span>
               <span className="tabular-nums text-foreground-muted">{pct.toFixed(1)}%</span>

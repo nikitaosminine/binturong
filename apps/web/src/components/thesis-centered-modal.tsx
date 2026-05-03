@@ -1,13 +1,18 @@
 import { useState, useEffect, useRef } from "react";
-import { X, Pencil, Trash2, Check, Paperclip, FileText, FileImage, ChevronLeft, ChevronRight, ZoomIn } from "lucide-react";
-import { DialogClose } from "@/components/ui/dialog";
 import {
-  Thesis,
-  ThesisAttachment,
-  ThesisConviction,
-  ThesisStatus,
-  STOCKS,
-} from "@/lib/thesis";
+  X,
+  Pencil,
+  Trash2,
+  Check,
+  Paperclip,
+  FileText,
+  FileImage,
+  ChevronLeft,
+  ChevronRight,
+  ZoomIn,
+} from "lucide-react";
+import { DialogClose } from "@/components/ui/dialog";
+import { Thesis, ThesisAttachment, ThesisConviction, ThesisStatus, STOCKS } from "@/lib/thesis";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { ThesisBody } from "./thesis-body";
 import { Button } from "@/components/ui/button";
@@ -19,13 +24,15 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   thesis: Thesis | null;
-  createPrefill?: Partial<Pick<Thesis, "title" | "summary" | "tickers" | "horizon" | "tags">> | null;
+  createPrefill?: Partial<
+    Pick<Thesis, "title" | "summary" | "tickers" | "horizon" | "tags">
+  > | null;
   onSave: (data: Omit<Thesis, "id" | "createdAt">) => void;
   onDelete?: (id: string) => void;
 }
 
 const STATUS_CLASSES: Record<ThesisStatus, string> = {
-  active: "bg-primary/15 text-primary",
+  active: "bg-foreground/10 text-foreground",
   "playing-out": "bg-positive/15 text-positive",
   invalidated: "bg-negative/15 text-negative",
   closed: "bg-muted text-muted-foreground",
@@ -99,10 +106,13 @@ function parseCsv(text: string): string[][] {
     for (let i = 0; i < line.length; i++) {
       const ch = line[i];
       if (ch === '"') {
-        if (inQuote && line[i + 1] === '"') { cur += '"'; i++; }
-        else inQuote = !inQuote;
+        if (inQuote && line[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else inQuote = !inQuote;
       } else if (ch === "," && !inQuote) {
-        cells.push(cur); cur = "";
+        cells.push(cur);
+        cur = "";
       } else {
         cur += ch;
       }
@@ -113,7 +123,14 @@ function parseCsv(text: string): string[][] {
   return rows;
 }
 
-export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill, onSave, onDelete }: Props) {
+export function ThesisCenteredModal({
+  open,
+  onOpenChange,
+  thesis,
+  createPrefill,
+  onSave,
+  onDelete,
+}: Props) {
   const isCreate = thesis === null;
   const [mode, setMode] = useState<"view" | "edit">(isCreate ? "edit" : "view");
 
@@ -154,7 +171,12 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
     if (src) {
       setTitle(src.title);
       setSummary(src.summary);
-      setReasoning(src.body.filter((b) => b.type === "p").map((b) => b.content as string).join("\n\n"));
+      setReasoning(
+        src.body
+          .filter((b) => b.type === "p")
+          .map((b) => b.content as string)
+          .join("\n\n"),
+      );
       setConviction(src.conviction);
       setStatus(src.status);
       setTickers(src.tickers);
@@ -190,7 +212,7 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
             .from("thesis-attachments")
             .createSignedUrl(att.path, 3600);
           if (data) urls[att.path] = data.signedUrl;
-        })
+        }),
       );
       setSignedUrls(urls);
     };
@@ -212,7 +234,7 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
     (s) =>
       (s.ticker.toLowerCase().includes(tickerSearch.toLowerCase()) ||
         s.name.toLowerCase().includes(tickerSearch.toLowerCase())) &&
-      !tickers.includes(s.ticker)
+      !tickers.includes(s.ticker),
   ).slice(0, 8);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -235,15 +257,15 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
     setUploading(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
       // Upload pending files to storage
       const newAttachments: ThesisAttachment[] = [];
       for (const file of pendingFiles) {
         const path = `${user!.id}/${crypto.randomUUID()}-${file.name}`;
-        const { error } = await supabase.storage
-          .from("thesis-attachments")
-          .upload(path, file);
+        const { error } = await supabase.storage.from("thesis-attachments").upload(path, file);
         if (!error) {
           newAttachments.push({ path, name: file.name, type: file.type, size: file.size });
         }
@@ -254,9 +276,7 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
         await supabase.storage.from("thesis-attachments").remove(removedPaths);
       }
 
-      const body = reasoning.trim()
-        ? [{ type: "p" as const, content: reasoning.trim() }]
-        : [];
+      const body = reasoning.trim() ? [{ type: "p" as const, content: reasoning.trim() }] : [];
 
       onSave({
         title: title.trim(),
@@ -267,7 +287,10 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
         body,
         evidence: thesis?.evidence ?? [],
         horizon: horizon.trim(),
-        tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
+        tags: tags
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean),
         attachments: [...existingAttachments, ...newAttachments],
       });
       onOpenChange(false);
@@ -293,22 +316,33 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent hideCloseButton className="sm:max-w-3xl max-h-[88vh] flex flex-col p-0 gap-0 overflow-hidden">
-
+      <DialogContent
+        hideCloseButton
+        className="sm:max-w-3xl max-h-[88vh] flex flex-col p-0 gap-0 overflow-hidden"
+      >
         {/* ── VIEW mode ── */}
         {mode === "view" && thesis && (
           <>
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-border/50 shrink-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CLASSES[thesis.status]}`}>
+                <span
+                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CLASSES[thesis.status]}`}
+                >
                   {STATUS_LABELS[thesis.status]}
                 </span>
                 <ConvictionDots level={thesis.conviction} />
-                <span className="text-xs text-muted-foreground capitalize">{thesis.conviction} conviction</span>
+                <span className="text-xs text-muted-foreground capitalize">
+                  {thesis.conviction} conviction
+                </span>
               </div>
               <div className="flex items-center gap-1 shrink-0">
-                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setMode("edit")}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => setMode("edit")}
+                >
                   <Pencil className="h-3.5 w-3.5" />
                 </Button>
                 {onDelete && (
@@ -322,7 +356,11 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
                   </Button>
                 )}
                 <DialogClose asChild>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                  >
                     <X className="h-3.5 w-3.5" />
                   </Button>
                 </DialogClose>
@@ -339,18 +377,28 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
                   )}
                   <div className="flex gap-4 text-xs text-muted-foreground mt-2">
                     {thesis.horizon && (
-                      <span>Horizon: <span className="text-foreground font-medium">{thesis.horizon}</span></span>
+                      <span>
+                        Horizon:{" "}
+                        <span className="text-foreground font-medium">{thesis.horizon}</span>
+                      </span>
                     )}
-                    <span>Added: <span className="text-foreground font-medium">{thesis.createdAt}</span></span>
+                    <span>
+                      Added: <span className="text-foreground font-medium">{thesis.createdAt}</span>
+                    </span>
                   </div>
                 </div>
 
                 {thesis.tickers.length > 0 && (
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Linked positions</p>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                      Linked positions
+                    </p>
                     <div className="flex flex-wrap gap-1.5">
                       {thesis.tickers.map((tk) => (
-                        <span key={tk} className="inline-flex items-center px-2 py-0.5 rounded bg-muted text-xs font-mono font-medium">
+                        <span
+                          key={tk}
+                          className="inline-flex items-center px-2 py-0.5 rounded bg-muted text-xs font-mono font-medium"
+                        >
                           {tk}
                         </span>
                       ))}
@@ -360,7 +408,9 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
 
                 {thesis.body.length > 0 && (
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Reasoning</p>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+                      Reasoning
+                    </p>
                     <ThesisBody blocks={thesis.body} />
                   </div>
                 )}
@@ -368,13 +418,17 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
                 {/* Attachments — view */}
                 {(thesis.attachments ?? []).length > 0 && (
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Attachments</p>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+                      Attachments
+                    </p>
                     <div className="flex flex-wrap gap-3">
                       {(thesis.attachments ?? []).map((att, idx) => {
                         const url = signedUrls[att.path];
                         const isImage = att.type.startsWith("image/");
                         const isCsvFile = isCsv(att.type, att.name);
-                        const imageAtts = (thesis.attachments ?? []).filter((a) => a.type.startsWith("image/"));
+                        const imageAtts = (thesis.attachments ?? []).filter((a) =>
+                          a.type.startsWith("image/"),
+                        );
 
                         if (isImage) {
                           return url ? (
@@ -396,7 +450,10 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
                               </span>
                             </button>
                           ) : (
-                            <div key={att.path} className="h-28 w-28 rounded-md border border-border/50 bg-muted animate-pulse" />
+                            <div
+                              key={att.path}
+                              className="h-28 w-28 rounded-md border border-border/50 bg-muted animate-pulse"
+                            />
                           );
                         }
 
@@ -419,7 +476,9 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
                             >
                               <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                               <span className="truncate max-w-[160px]">{att.name}</span>
-                              <span className="text-muted-foreground/60 shrink-0">{formatSize(att.size)}</span>
+                              <span className="text-muted-foreground/60 shrink-0">
+                                {formatSize(att.size)}
+                              </span>
                             </button>
                           );
                         }
@@ -433,7 +492,9 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
                           >
                             <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                             <span className="truncate max-w-[160px]">{att.name}</span>
-                            <span className="text-muted-foreground/60 shrink-0">{formatSize(att.size)}</span>
+                            <span className="text-muted-foreground/60 shrink-0">
+                              {formatSize(att.size)}
+                            </span>
                           </a>
                         );
                       })}
@@ -443,7 +504,9 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
 
                 {thesis.evidence.length > 0 && (
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Agent evidence log</p>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+                      Agent evidence log
+                    </p>
                     <div className="border-l border-border ml-2 space-y-3 pl-4">
                       {thesis.evidence.map((ev) => (
                         <div key={ev.id} className="relative">
@@ -462,7 +525,10 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
                 {thesis.tags.length > 0 && (
                   <div className="flex flex-wrap gap-1.5">
                     {thesis.tags.map((tag) => (
-                      <span key={tag} className="inline-flex items-center px-2 py-0.5 rounded-full bg-muted/60 text-xs text-muted-foreground">
+                      <span
+                        key={tag}
+                        className="inline-flex items-center px-2 py-0.5 rounded-full bg-muted/60 text-xs text-muted-foreground"
+                      >
                         {tag}
                       </span>
                     ))}
@@ -480,7 +546,11 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
             <div className="flex items-center justify-between px-6 py-4 border-b border-border/50 shrink-0">
               <h2 className="text-base font-semibold">{isCreate ? "New take" : "Edit take"}</h2>
               <DialogClose asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                >
                   <X className="h-3.5 w-3.5" />
                 </Button>
               </DialogClose>
@@ -524,7 +594,10 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
                 <Label className="text-xs text-muted-foreground">Tickers</Label>
                 <div className="flex flex-wrap gap-1.5 p-2 rounded-md border border-input min-h-9 bg-transparent">
                   {tickers.map((tk) => (
-                    <span key={tk} className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-muted text-xs font-mono">
+                    <span
+                      key={tk}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-muted text-xs font-mono"
+                    >
                       {tk}
                       <button
                         onClick={() => setTickers((prev) => prev.filter((t) => t !== tk))}
@@ -537,7 +610,10 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
                   <input
                     placeholder={tickers.length === 0 ? "Search ticker or company…" : ""}
                     value={tickerSearch}
-                    onChange={(e) => { setTickerSearch(e.target.value); setShowTickerDropdown(true); }}
+                    onChange={(e) => {
+                      setTickerSearch(e.target.value);
+                      setShowTickerDropdown(true);
+                    }}
                     onFocus={() => setShowTickerDropdown(true)}
                     className="flex-1 min-w-[140px] bg-transparent text-sm outline-none placeholder:text-muted-foreground"
                   />
@@ -572,7 +648,7 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
                         onClick={() => setConviction(opt.value)}
                         className={`flex-1 h-9 rounded text-sm font-medium transition-colors border ${
                           conviction === opt.value
-                            ? "bg-primary text-primary-foreground border-primary"
+                            ? "border-foreground bg-foreground text-background"
                             : "border-border text-muted-foreground hover:text-foreground hover:border-border/80"
                         }`}
                       >
@@ -590,7 +666,9 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
                     className="w-full h-9 rounded-md border border-input bg-transparent px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                   >
                     {STATUS_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -624,11 +702,15 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
                 <Label className="text-xs text-muted-foreground">Attachments</Label>
                 <div className="flex flex-wrap gap-2 p-2 rounded-md border border-input min-h-9 bg-transparent">
                   {existingAttachments.map((att) => (
-                    <span key={att.path} className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-muted text-xs">
-                      {att.type.startsWith("image/")
-                        ? <FileImage className="h-3 w-3 text-muted-foreground" />
-                        : <FileText className="h-3 w-3 text-muted-foreground" />
-                      }
+                    <span
+                      key={att.path}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-muted text-xs"
+                    >
+                      {att.type.startsWith("image/") ? (
+                        <FileImage className="h-3 w-3 text-muted-foreground" />
+                      ) : (
+                        <FileText className="h-3 w-3 text-muted-foreground" />
+                      )}
                       <span className="max-w-[120px] truncate">{att.name}</span>
                       <button
                         onClick={() => removeExistingAttachment(att)}
@@ -639,16 +721,20 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
                     </span>
                   ))}
                   {pendingFiles.map((f, i) => (
-                    <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-primary/15 text-primary text-xs">
-                      {f.type.startsWith("image/")
-                        ? <FileImage className="h-3 w-3" />
-                        : <FileText className="h-3 w-3" />
-                      }
+                    <span
+                      key={i}
+                      className="inline-flex items-center gap-1 rounded bg-foreground/10 px-2 py-0.5 text-xs text-foreground"
+                    >
+                      {f.type.startsWith("image/") ? (
+                        <FileImage className="h-3 w-3" />
+                      ) : (
+                        <FileText className="h-3 w-3" />
+                      )}
                       <span className="max-w-[120px] truncate">{f.name}</span>
-                      <span className="text-primary/60">{formatSize(f.size)}</span>
+                      <span className="text-foreground/60">{formatSize(f.size)}</span>
                       <button
                         onClick={() => removePendingFile(i)}
-                        className="hover:text-primary/70 ml-0.5"
+                        className="ml-0.5 hover:text-foreground/70"
                       >
                         <X className="h-3 w-3" />
                       </button>
@@ -675,7 +761,9 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
 
             {/* Footer */}
             <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border/50 shrink-0">
-              <Button variant="ghost" size="sm" onClick={handleCancel} disabled={uploading}>Cancel</Button>
+              <Button variant="ghost" size="sm" onClick={handleCancel} disabled={uploading}>
+                Cancel
+              </Button>
               <Button size="sm" onClick={handleSave} disabled={!title.trim() || uploading}>
                 {uploading ? (
                   <span className="flex items-center gap-1.5">
@@ -768,9 +856,19 @@ export function ThesisCenteredModal({ open, onOpenChange, thesis, createPrefill,
               <table className="text-xs border-collapse w-full">
                 <tbody>
                   {sheetPreview.rows.slice(0, 200).map((row, ri) => (
-                    <tr key={ri} className={ri === 0 ? "bg-muted/40 font-semibold sticky top-0" : "border-t border-border/40 hover:bg-muted/20"}>
+                    <tr
+                      key={ri}
+                      className={
+                        ri === 0
+                          ? "bg-muted/40 font-semibold sticky top-0"
+                          : "border-t border-border/40 hover:bg-muted/20"
+                      }
+                    >
                       {row.map((cell, ci) => (
-                        <td key={ci} className="px-3 py-1.5 whitespace-nowrap border-r border-border/30 last:border-r-0 font-mono tabular-nums">
+                        <td
+                          key={ci}
+                          className="px-3 py-1.5 whitespace-nowrap border-r border-border/30 last:border-r-0 font-mono tabular-nums"
+                        >
                           {cell}
                         </td>
                       ))}

@@ -5,8 +5,10 @@ export interface Env {
   SUPABASE_SERVICE_KEY: string;
   SUPABASE_ANON_KEY: string;
   AGENT_RUNS_QUEUE: Queue<AgentRunQueueMessage>;
+  SNAPSHOT_QUEUE: Queue<SnapshotQueueMessage>;
   GROK_MAIN_API_KEY?: string;
   GROK_SUB_API_KEY?: string;
+  GROK_NORMALIZATION_API_KEY?: string;
   GROK_WEB_SEARCH_MODEL?: string;
   GROK_API_BASE_URL?: string;
   MAIN_AGENT_SYSTEM_PROMPT?: string;
@@ -52,6 +54,128 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function searchYahooAssets(query: string): Promise<AssetSearchResult[]> {
+  const searchUrl = new URL("https://query1.finance.yahoo.com/v1/finance/search");
+  searchUrl.searchParams.set("q", query);
+  searchUrl.searchParams.set("quotesCount", "10");
+  searchUrl.searchParams.set("newsCount", "0");
+  searchUrl.searchParams.set("enableFuzzyQuery", "false");
+  searchUrl.searchParams.set("enableEnhancedTrivialQuery", "true");
+
+  const result = await fetchJson<YahooSearchResponse>(searchUrl.toString());
+  return (result.quotes || [])
+    .filter((quote) => quote.symbol)
+    .map((quote) => ({
+      ticker: quote.symbol || "",
+      name: quote.shortname || quote.longname || quote.symbol || "",
+      exchange: quote.exchange || quote.fullExchangeName || "N/A",
+      assetType: quote.quoteType || "N/A",
+    }))
+    .slice(0, 10);
+}
+
+function yahooExchangeToPrimary(exchange: string | null | undefined, ticker: string | null | undefined): string | null {
+  const value = `${exchange ?? ""} ${ticker ?? ""}`.toUpperCase();
+  if (/\b(NYQ|NYSE)\b/.test(value)) return "NYSE";
+  if (/\b(NMS|NGM|NCM|NASDAQ)\b/.test(value)) return "NASDAQ";
+  if (/\b(PAR|EPA|EURONEXT|XPAR)\b/.test(value) || /\.PA\b/.test(value)) return "EURONEXT";
+  if (/\b(GER|XETRA|FRA|XETR)\b/.test(value) || /\.DE\b/.test(value)) return "XETRA";
+  if (/\b(LSE|LONDON)\b/.test(value) || /\.L\b/.test(value)) return "LSE";
+  if (/\b(TYO|TSE|TOKYO)\b/.test(value) || /\.T\b/.test(value)) return "TSE";
+  return null;
+}
+
+function stripCurrency(raw: string): string {
+  return raw.replace(/[^0-9.,-]/g, "").trim();
+}
+
+function parseFlexibleNumber(raw: string | number | null | undefined): number {
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : 0;
+  const value = stripCurrency(String(raw ?? "")).replace(/\s+/g, "");
+  if (!value) return 0;
+  const lastComma = value.lastIndexOf(",");
+  const lastDot = value.lastIndexOf(".");
+
+  if (lastComma > -1 && lastDot > -1) {
+    const decimalSeparator = lastComma > lastDot ? "," : ".";
+    const thousandsSeparator = decimalSeparator === "," ? "." : ",";
+    return Number.parseFloat(value.split(thousandsSeparator).join("").replace(decimalSeparator, ".")) || 0;
+  }
+
+  if (lastComma > -1) {
+    const parts = value.split(",");
+    if (parts.length === 2 && parts[1].length === 3 && parts[0].length >= 1) {
+      return Number.parseFloat(parts.join("")) || 0;
+    }
+    return Number.parseFloat(value.replace(",", ".")) || 0;
+  }
+
+  return Number.parseFloat(value) || 0;
+}
+
+function toDateString(value: Date): string {
+  return value.toISOString().slice(0, 10);
+}
+
+function normalizeDateString(raw: string): string {
+  const value = raw.trim();
+  const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) throw new Error(`Invalid transaction date: ${raw}`);
+  return toDateString(parsed);
+}
+
+function isTransactionSide(value: unknown): value is TransactionSide {
+  return value === "BUY" || value === "SELL" || value === "DEP" || value === "WD" || value === "DIV" || value === "FEE";
+}
+
+function normalizeTransactionRows(rows: NormalisedTransactionRow[]): NormalisedTransactionRow[] {
+  return rows.map((row, index) => {
+    const side = String(row.side ?? "").toUpperCase();
+    if (!isTransactionSide(side)) throw new Error(`Invalid side on row ${index + 1}`);
+    return {
+      date: normalizeDateString(String(row.date ?? "")),
+      symbol: String(row.symbol || (row.isin ? row.isin : "CASH")).trim() || "CASH",
+      isin: row.isin ? String(row.isin).trim().toUpperCase() : null,
+      side,
+      quantity: row.quantity ?? null,
+      net_amount: row.net_amount ?? null,
+      commission: row.commission ?? "0",
+    };
+  });
+}
+
+async function getAuthenticatedUserId(request: Request, env: Env): Promise<string | null> {
+  const auth = request.headers.get("Authorization") ?? "";
+  const token = auth.match(/^Bearer\s+(.+)$/i)?.[1];
+  if (!token || !env.SUPABASE_ANON_KEY) return null;
+
+  const client = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+  });
+  const { data, error } = await client.auth.getUser();
+  if (error || !data.user) return null;
+  return data.user.id;
+}
+
+async function assertPortfolioAccess(env: Env, portfolioId: string, userId: string): Promise<Response | null> {
+  const { data, error } = await db(env)
+    .from("portfolios")
+    .select("id")
+    .eq("id", portfolioId)
+    .eq("user_id", userId)
+    .single();
+  if (error || !data) return json({ error: "Portfolio not found" }, 404);
+  return null;
+}
+
+async function requirePortfolioAccess(request: Request, env: Env, portfolioId: string): Promise<Response | null> {
+  const userId = await getAuthenticatedUserId(request, env);
+  if (!userId) return json({ error: "Unauthorized" }, 401);
+  return assertPortfolioAccess(env, portfolioId, userId);
+}
+
 interface YahooSearchQuote {
   symbol?: string;
   shortname?: string;
@@ -77,6 +201,8 @@ interface YahooChartResponse {
       meta?: {
         regularMarketPrice?: number | null;
         previousClose?: number | null;
+        instrumentType?: string | null;
+        quoteType?: string | null;
       };
       timestamp?: number[];
       indicators?: {
@@ -130,6 +256,45 @@ interface AgentRunQueueMessage {
   userId: string;
   portfolioId: string;
   triggerType: AgentRunTriggerType;
+}
+
+interface SnapshotQueueMessage {
+  type: "full_rebuild" | "daily_update";
+  portfolio_id: string;
+}
+
+type WorkerQueueMessage = AgentRunQueueMessage | SnapshotQueueMessage;
+
+type TransactionSide = "BUY" | "SELL" | "DEP" | "WD" | "DIV" | "FEE";
+
+interface NormalisedTransactionRow {
+  date: string;
+  symbol: string;
+  isin: string | null;
+  side: TransactionSide;
+  quantity: string | number | null;
+  net_amount: string | number | null;
+  commission?: string | number | null;
+}
+
+interface TransactionRow {
+  id?: string;
+  portfolio_id: string;
+  date: string;
+  symbol: string;
+  isin: string | null;
+  yahoo_ticker: string | null;
+  side: TransactionSide;
+  quantity: number | null;
+  net_amount: number | null;
+  commission: number;
+}
+
+interface AssetSearchResult {
+  ticker: string;
+  name: string;
+  exchange: string;
+  assetType: string;
 }
 
 type AgentToolName =
@@ -510,6 +675,7 @@ function toConceptQuery(input: { title: string; summary: string; tickers: string
 
 interface GrokChatResponse {
   choices?: Array<{
+    finish_reason?: string | null;
     message?: {
       content?: string | null;
     };
@@ -655,6 +821,316 @@ async function getYtdChangePercent(symbol: string): Promise<number | null> {
   } catch {
     return null;
   }
+}
+
+function isSnapshotQueueMessage(message: WorkerQueueMessage): message is SnapshotQueueMessage {
+  return "type" in message && (message.type === "full_rebuild" || message.type === "daily_update");
+}
+
+async function fetchHistoricalPrices(
+  ticker: string,
+  firstDate: Date,
+): Promise<{ prices: Map<string, number>; type: string | null }> {
+  const period1 = Math.floor(firstDate.getTime() / 1000);
+  const period2 = Math.floor(Date.now() / 1000);
+  const url = new URL(`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}`);
+  url.searchParams.set("period1", String(period1));
+  url.searchParams.set("period2", String(period2));
+  url.searchParams.set("interval", "1d");
+  url.searchParams.set("events", "history");
+
+  const chart = await fetchJson<YahooChartResponse>(url.toString());
+  const result = chart.chart?.result?.[0];
+  const instrumentType = normalizeYahooInstrumentType(
+    result?.meta?.instrumentType ?? result?.meta?.quoteType ?? null,
+  );
+  const timestamps = result?.timestamp ?? [];
+  const closes = result?.indicators?.quote?.[0]?.close ?? [];
+  const dateMap = new Map<string, number>();
+
+  timestamps.forEach((ts, index) => {
+    const close = closes[index];
+    if (close == null) return;
+    dateMap.set(toDateString(new Date(ts * 1000)), close);
+  });
+
+  return { prices: dateMap, type: instrumentType };
+}
+
+async function getPricesByTicker(
+  env: Env,
+  tickers: string[],
+  firstDate: Date,
+): Promise<{
+  pricesByTicker: Map<string, Map<string, number>>;
+  typeByTicker: Map<string, string>;
+}> {
+  const client = db(env);
+  const allPriceRows: Array<{ yahoo_ticker: string; date: string; closing_price: number }> = [];
+  const typeByTicker = new Map<string, string>();
+  const entries = await Promise.all(
+    tickers.map(async (ticker) => {
+      try {
+        const { prices: dateMap, type } = await fetchHistoricalPrices(ticker, firstDate);
+        const priceRows = [...dateMap.entries()].map(([date, closing_price]) => ({
+          yahoo_ticker: ticker,
+          date,
+          closing_price,
+        }));
+        allPriceRows.push(...priceRows);
+        if (type) typeByTicker.set(ticker.toUpperCase(), type);
+        return [ticker, dateMap] as const;
+      } catch (error) {
+        console.error(`price fetch failed for ${ticker}`, error);
+        return [ticker, new Map<string, number>()] as const;
+      }
+    }),
+  );
+  if (allPriceRows.length > 0) {
+    await client.from("price_history").upsert(allPriceRows, {
+      onConflict: "yahoo_ticker,date",
+    });
+  }
+  return { pricesByTicker: new Map(entries), typeByTicker };
+}
+
+function normalizeYahooInstrumentType(value: string | null | undefined): string | null {
+  const instrumentType = value?.trim().toUpperCase();
+  if (!instrumentType) return null;
+  if (instrumentType === "ETF") return "ETF";
+  if (instrumentType === "EQUITY" || instrumentType === "STOCK") return "Equity";
+  return instrumentType;
+}
+
+function getCarryForwardPrice(dateMap: Map<string, number> | undefined, dateStr: string): number {
+  if (!dateMap) return 0;
+  const exact = dateMap.get(dateStr);
+  if (exact != null) return exact;
+  let bestDate = "";
+  let bestPrice = 0;
+  for (const [date, price] of dateMap.entries()) {
+    if (date <= dateStr && date > bestDate) {
+      bestDate = date;
+      bestPrice = price;
+    }
+  }
+  return bestPrice;
+}
+
+async function loadPortfolioTransactions(env: Env, portfolioId: string): Promise<TransactionRow[]> {
+  const { data, error } = await db(env)
+    .from("transactions")
+    .select("id, portfolio_id, date, symbol, isin, yahoo_ticker, side, quantity, net_amount, commission")
+    .eq("portfolio_id", portfolioId)
+    .order("date", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => ({
+    id: String(row.id),
+    portfolio_id: String(row.portfolio_id),
+    date: String(row.date),
+    symbol: String(row.symbol),
+    isin: row.isin == null ? null : String(row.isin),
+    yahoo_ticker: row.yahoo_ticker == null ? null : String(row.yahoo_ticker),
+    side: row.side as TransactionSide,
+    quantity: row.quantity == null ? null : Number(row.quantity),
+    net_amount: row.net_amount == null ? null : Number(row.net_amount),
+    commission: Number(row.commission ?? 0),
+  }));
+}
+
+async function rebuildCurrentHoldings(
+  env: Env,
+  portfolioId: string,
+  typeByTicker: Map<string, string> = new Map(),
+): Promise<void> {
+  const client = db(env);
+  const txns = await loadPortfolioTransactions(env, portfolioId);
+  const lots = new Map<
+    string,
+    {
+      isin: string | null;
+      ticker: string;
+      name: string;
+      quantity: number;
+      cost: number;
+      firstDate: string;
+    }
+  >();
+  let cashValue = 0;
+
+  for (const txn of txns) {
+    cashValue += txn.net_amount ?? 0;
+    if (!txn.isin || (txn.side !== "BUY" && txn.side !== "SELL")) continue;
+
+    const key = txn.isin;
+    const current = lots.get(key) ?? {
+      isin: txn.isin,
+      ticker: txn.yahoo_ticker || txn.symbol,
+      name: txn.symbol,
+      quantity: 0,
+      cost: 0,
+      firstDate: txn.date,
+    };
+    const quantity = txn.quantity ?? 0;
+
+    if (txn.side === "BUY") {
+      current.quantity += quantity;
+      current.cost += Math.abs(txn.net_amount ?? 0);
+      if (txn.date < current.firstDate) current.firstDate = txn.date;
+    } else if (txn.side === "SELL") {
+      const averageCost = current.quantity > 0 ? current.cost / current.quantity : 0;
+      current.quantity -= quantity;
+      current.cost = Math.max(0, current.cost - averageCost * quantity);
+    }
+
+    if (current.quantity > 0.000001) lots.set(key, current);
+    else lots.delete(key);
+  }
+
+  await client.from("holdings").delete().eq("portfolio_id", portfolioId);
+  const holdingRows = [...lots.values()].map((lot) => ({
+    portfolio_id: portfolioId,
+    ticker: lot.ticker.toUpperCase(),
+    isin: lot.isin,
+    name: lot.name,
+    purchase_date: lot.firstDate,
+    purchase_price: lot.quantity > 0 ? lot.cost / lot.quantity : 0,
+    quantity: lot.quantity,
+    fees: 0,
+    asset_type: typeByTicker.get(lot.ticker.toUpperCase()) ?? "Other",
+  }));
+  if (holdingRows.length > 0) await client.from("holdings").insert(holdingRows);
+  await client.from("portfolios").update({ cash_value: cashValue }).eq("id", portfolioId);
+}
+
+function computeSnapshotForDate(
+  txns: TransactionRow[],
+  pricesByTicker: Map<string, Map<string, number>>,
+  dateStr: string,
+): { cash_balance: number; securities_value: number; total_value: number } {
+  const holdings = new Map<string, { quantity: number; ticker: string | null }>();
+  let cashBalance = 0;
+
+  for (const txn of txns) {
+    if (txn.date > dateStr) continue;
+    cashBalance += txn.net_amount ?? 0;
+    if (!txn.isin || (txn.side !== "BUY" && txn.side !== "SELL")) continue;
+    const current = holdings.get(txn.isin) ?? { quantity: 0, ticker: txn.yahoo_ticker };
+    if (txn.yahoo_ticker) current.ticker = txn.yahoo_ticker;
+    if (txn.side === "BUY") current.quantity += txn.quantity ?? 0;
+    if (txn.side === "SELL") current.quantity -= txn.quantity ?? 0;
+    holdings.set(txn.isin, current);
+  }
+
+  let securitiesValue = 0;
+  for (const holding of holdings.values()) {
+    if (holding.quantity <= 0 || !holding.ticker) continue;
+    securitiesValue += holding.quantity * getCarryForwardPrice(pricesByTicker.get(holding.ticker), dateStr);
+  }
+
+  return {
+    cash_balance: cashBalance,
+    securities_value: securitiesValue,
+    total_value: cashBalance + securitiesValue,
+  };
+}
+
+async function recomputeSnapshots(env: Env, portfolioId: string): Promise<void> {
+  const client = db(env);
+  const txns = await loadPortfolioTransactions(env, portfolioId);
+  console.log("[recompute] transactions fetched:", txns.length);
+
+  if (txns.length === 0) {
+    await rebuildCurrentHoldings(env, portfolioId);
+    await client.from("portfolio_snapshots").delete().eq("portfolio_id", portfolioId);
+    console.log("[recompute] snapshots built:", 0);
+    console.log("[recompute] insert result:", JSON.stringify(null));
+    return;
+  }
+
+  const firstDate = new Date(`${txns[0].date}T00:00:00.000Z`);
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  const tickers = Array.from(new Set(txns.map((txn) => txn.yahoo_ticker).filter(Boolean))) as string[];
+  const { pricesByTicker, typeByTicker } = await getPricesByTicker(env, tickers, firstDate);
+  await rebuildCurrentHoldings(env, portfolioId, typeByTicker);
+  const snapshots: Array<{
+    portfolio_id: string;
+    date: string;
+    total_value: number;
+    cash_balance: number;
+    securities_value: number;
+  }> = [];
+
+  const cursor = new Date(firstDate);
+  while (cursor <= today) {
+    const date = toDateString(cursor);
+    snapshots.push({
+      portfolio_id: portfolioId,
+      date,
+      ...computeSnapshotForDate(txns, pricesByTicker, date),
+    });
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  console.log("[recompute] snapshots built:", snapshots.length);
+
+  await client.from("portfolio_snapshots").delete().eq("portfolio_id", portfolioId);
+  for (let i = 0; i < snapshots.length; i += 500) {
+    const { error: insertError } = await client
+      .from("portfolio_snapshots")
+      .insert(snapshots.slice(i, i + 500));
+    console.log("[recompute] insert result:", JSON.stringify(insertError));
+    if (insertError) throw new Error(insertError.message);
+  }
+}
+
+async function appendTodaySnapshot(env: Env, portfolioId: string): Promise<void> {
+  const txns = await loadPortfolioTransactions(env, portfolioId);
+  if (txns.length === 0) return;
+
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  const date = toDateString(today);
+  const tickers = Array.from(new Set(txns.map((txn) => txn.yahoo_ticker).filter(Boolean))) as string[];
+  const { pricesByTicker, typeByTicker } = await getPricesByTicker(
+    env,
+    tickers,
+    new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+  );
+  await db(env).from("portfolio_snapshots").upsert(
+    {
+      portfolio_id: portfolioId,
+      date,
+      ...computeSnapshotForDate(txns, pricesByTicker, date),
+    },
+    { onConflict: "portfolio_id,date" },
+  );
+  await rebuildCurrentHoldings(env, portfolioId, typeByTicker);
+}
+
+async function enqueueDailySnapshotsForClosedMarkets(env: Env, scheduledTime: number): Promise<void> {
+  if (!env.SNAPSHOT_QUEUE) return;
+  const scheduledAt = new Date(scheduledTime);
+  const timeKey = `${scheduledAt.getUTCHours()}:${String(scheduledAt.getUTCMinutes()).padStart(2, "0")}`;
+  const exchangesByTime: Record<string, string[]> = {
+    "6:30": ["TSE"],
+    "16:30": ["LSE"],
+    "17:30": ["EURONEXT", "XETRA"],
+    "21:00": ["NYSE", "NASDAQ"],
+  };
+  const exchanges = exchangesByTime[timeKey] ?? [];
+  if (exchanges.length === 0) return;
+
+  const { data, error } = await db(env)
+    .from("portfolios")
+    .select("id")
+    .in("primary_exchange", exchanges);
+  if (error) throw new Error(`daily snapshot portfolio lookup failed: ${error.message}`);
+  await Promise.all(
+    (data ?? []).map((portfolio) =>
+      env.SNAPSHOT_QUEUE.send({ type: "daily_update", portfolio_id: String(portfolio.id) }),
+    ),
+  );
 }
 
 function buildIdempotencyKey(input: {
@@ -1474,6 +1950,258 @@ export default {
       }
     }
 
+    const recomputeMatch = pathname.match(/^\/api\/portfolios\/([^/]+)\/recompute$/);
+    if (recomputeMatch && method === "POST") {
+      const portfolioId = recomputeMatch[1];
+      const accessError = await requirePortfolioAccess(request, env, portfolioId);
+      if (accessError) return accessError;
+      console.log("[recompute] triggered for portfolio", portfolioId);
+      await recomputeSnapshots(env, portfolioId);
+      console.log("[recompute] done");
+      return json({ ok: true });
+    }
+
+    const transactionPreviewMatch = pathname.match(/^\/api\/portfolios\/([^/]+)\/transactions\/preview$/);
+    if (transactionPreviewMatch && method === "POST") {
+      const portfolioId = transactionPreviewMatch[1];
+      const accessError = await requirePortfolioAccess(request, env, portfolioId);
+      if (accessError) return accessError;
+      if (!env.GROK_NORMALIZATION_API_KEY) {
+        return json({ error: "Server misconfiguration: GROK_NORMALIZATION_API_KEY is missing" }, 500);
+      }
+
+      const body = (await request.json().catch(() => ({}))) as { csv?: string };
+      const csv = String(body.csv ?? "");
+      if (!csv.trim()) return json({ error: "csv is required" }, 400);
+
+      const prompt = [
+        "You are a financial data normalizer. Map broker CSV transaction rows to this exact schema:",
+        "date: ISO date YYYY-MM-DD. symbol: security name or CASH. isin: ISIN or null.",
+        "side: one of BUY, SELL, DEP, WD, DIV, FEE.",
+        "quantity: raw string share quantity, null for cash/fee rows.",
+        "net_amount: raw string signed cash impact, negative for BUY/FEE/WD, positive for SELL/DEP/DIV.",
+        "commission: raw string fee amount, default 0.",
+        "Rules: return raw number strings with currency symbols unchanged; do not invent missing data.",
+        "Refunds/reimbursements are DEP. Standalone tax/stamp-duty rows are FEE.",
+        'Return only JSON: { "columns_detected": string[], "rows": [...], "errors": string[] }',
+        "",
+        "CSV:",
+        csv.slice(0, 100000),
+      ].join("\n");
+
+      try {
+        const res = await fetch(`${getGrokBaseUrl(env)}/chat/completions`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${env.GROK_NORMALIZATION_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: env.GROK_WEB_SEARCH_MODEL || "grok-4-1-fast-non-reasoning",
+            messages: [{ role: "user", content: prompt }],
+            response_format: { type: "json_object" },
+            max_tokens: 32000,
+          }),
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          return json({ error: `Normalization failed (${res.status}): ${text.slice(0, 300)}` }, 502);
+        }
+        const llmData = (await res.json()) as GrokChatResponse;
+        const content: string = llmData.choices?.[0]?.message?.content ?? "";
+
+        console.log("[csv-preview] finish_reason:", llmData.choices?.[0]?.finish_reason);
+        console.log("[csv-preview] content length:", content.length);
+        console.log("[csv-preview] content snippet:", content.slice(0, 300));
+
+        const stripped = content
+          .trim()
+          .replace(/^```json\s*/i, "")
+          .replace(/^```\s*/i, "")
+          .replace(/```\s*$/i, "")
+          .trim();
+
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(stripped) as Record<string, unknown>;
+        } catch {
+          const start = stripped.indexOf("{");
+          const end = stripped.lastIndexOf("}");
+          if (start >= 0 && end > start) {
+            parsed = JSON.parse(stripped.slice(start, end + 1)) as Record<string, unknown>;
+          } else {
+            throw new Error(`LLM returned unparseable content: ${stripped.slice(0, 300)}`);
+          }
+        }
+        return json(parsed);
+      } catch (error) {
+        return json({ error: error instanceof Error ? error.message : "Preview failed" }, 500);
+      }
+    }
+
+    const transactionsMatch = pathname.match(/^\/api\/portfolios\/([^/]+)\/transactions$/);
+    if (transactionsMatch) {
+      const portfolioId = transactionsMatch[1];
+      const accessError = await requirePortfolioAccess(request, env, portfolioId);
+      if (accessError) return accessError;
+
+      if (method === "GET") {
+        const { data, error } = await db(env)
+          .from("transactions")
+          .select("id, date, symbol, isin, yahoo_ticker, side, quantity, net_amount, commission")
+          .eq("portfolio_id", portfolioId)
+          .order("date", { ascending: false });
+        if (error) return json({ error: error.message }, 500);
+        return json({ transactions: data ?? [] });
+      }
+
+      if (method === "POST") {
+        if (!env.SNAPSHOT_QUEUE) {
+          return json({ error: "Server misconfiguration: SNAPSHOT_QUEUE binding is missing" }, 500);
+        }
+        const body = (await request.json().catch(() => ({}))) as { rows?: NormalisedTransactionRow[] };
+        const normalizedRows = normalizeTransactionRows(Array.isArray(body.rows) ? body.rows : []);
+        if (normalizedRows.length === 0) return json({ error: "rows are required" }, 400);
+
+        const parsedRows = normalizedRows.map((row) => ({
+          ...row,
+          quantity: row.quantity == null ? null : parseFlexibleNumber(row.quantity),
+          net_amount: row.net_amount == null ? null : parseFlexibleNumber(row.net_amount),
+          commission: parseFlexibleNumber(row.commission ?? "0"),
+        }));
+        const uniqueIsins = Array.from(new Set(parsedRows.map((row) => row.isin).filter(Boolean))) as string[];
+        const assetEntries = await Promise.all(
+          uniqueIsins.map(async (isin) => {
+            try {
+              const match = (await searchYahooAssets(isin))[0] ?? null;
+              return [isin, match] as const;
+            } catch {
+              return [isin, null] as const;
+            }
+          }),
+        );
+        const assetsByIsin = new Map(assetEntries);
+        const primaryExchangeCounts = new Map<string, number>();
+        const dbRows = parsedRows.map((row) => {
+          const asset = row.isin ? assetsByIsin.get(row.isin) : null;
+          const primaryExchange = yahooExchangeToPrimary(asset?.exchange, asset?.ticker);
+          if (primaryExchange) {
+            primaryExchangeCounts.set(primaryExchange, (primaryExchangeCounts.get(primaryExchange) ?? 0) + 1);
+          }
+          return {
+            portfolio_id: portfolioId,
+            date: row.date,
+            symbol: row.symbol,
+            isin: row.isin,
+            yahoo_ticker: row.isin ? (asset?.ticker ?? null) : null,
+            side: row.side,
+            quantity: row.quantity,
+            net_amount: row.net_amount,
+            commission: row.commission,
+          };
+        });
+
+        const { error } = await db(env).from("transactions").insert(dbRows);
+        if (error) return json({ error: error.message }, 500);
+
+        const primaryExchange = [...primaryExchangeCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+        if (primaryExchange) {
+          await db(env).from("portfolios").update({ primary_exchange: primaryExchange }).eq("id", portfolioId);
+        }
+        await rebuildCurrentHoldings(env, portfolioId);
+        await env.SNAPSHOT_QUEUE.send({ type: "full_rebuild", portfolio_id: portfolioId });
+        return json({ inserted: dbRows.length }, 201);
+      }
+    }
+
+    const chartMatch = pathname.match(/^\/api\/portfolios\/([^/]+)\/chart$/);
+    if (chartMatch && method === "GET") {
+      const portfolioId = chartMatch[1];
+      const accessError = await requirePortfolioAccess(request, env, portfolioId);
+      if (accessError) return accessError;
+
+      const [{ data: snapshots, error: snapshotsError }, { data: txns, error: txnsError }] = await Promise.all([
+        db(env)
+          .from("portfolio_snapshots")
+          .select("date, total_value, cash_balance, securities_value")
+          .eq("portfolio_id", portfolioId)
+          .order("date", { ascending: true }),
+        db(env)
+          .from("transactions")
+          .select("date, side, net_amount")
+          .eq("portfolio_id", portfolioId)
+          .order("date", { ascending: true }),
+      ]);
+      if (snapshotsError) return json({ error: snapshotsError.message }, 500);
+      if (txnsError) return json({ error: txnsError.message }, 500);
+      if (!snapshots || snapshots.length === 0) return json({ series: [] });
+
+      const flowByDate = new Map<string, number>();
+      for (const txn of txns ?? []) {
+        if (txn.side !== "DEP" && txn.side !== "WD") continue;
+        const date = String(txn.date);
+        flowByDate.set(date, (flowByDate.get(date) ?? 0) + Number(txn.net_amount ?? 0));
+      }
+
+      let twrIndex = 1;
+      let subPeriodStartValue: number | null = null;
+      const twrByDate = new Map<string, number>();
+      for (const snap of snapshots) {
+        const date = String(snap.date);
+        const totalValue = Number(snap.total_value ?? 0);
+        const flow = flowByDate.get(date) ?? 0;
+        if (subPeriodStartValue == null) {
+          subPeriodStartValue = totalValue;
+          twrByDate.set(date, 0);
+          continue;
+        }
+        if (flow !== 0 && subPeriodStartValue > 0) {
+          const valueBeforeFlow = totalValue - flow;
+          twrIndex *= 1 + (valueBeforeFlow - subPeriodStartValue) / subPeriodStartValue;
+          subPeriodStartValue = totalValue;
+        }
+        twrByDate.set(date, (twrIndex - 1) * 100);
+      }
+
+      let runningDeposits = 0;
+      const series = snapshots.map((snap) => {
+        const date = String(snap.date);
+        runningDeposits += flowByDate.get(date) ?? 0;
+        const totalValue = Number(snap.total_value ?? 0);
+        const simpleReturn = runningDeposits > 0 ? ((totalValue - runningDeposits) / runningDeposits) * 100 : 0;
+        return {
+          date,
+          total_value: totalValue,
+          cash_balance: Number(snap.cash_balance ?? 0),
+          securities_value: Number(snap.securities_value ?? 0),
+          simple_return_pct: Math.round(simpleReturn * 100) / 100,
+          twr_pct: Math.round((twrByDate.get(date) ?? 0) * 100) / 100,
+        };
+      });
+
+      return json({ series });
+    }
+
+    const transactionDeleteMatch = pathname.match(/^\/api\/portfolios\/([^/]+)\/transactions\/([^/]+)$/);
+    if (transactionDeleteMatch && method === "DELETE") {
+      const [, portfolioId, txnId] = transactionDeleteMatch;
+      const accessError = await requirePortfolioAccess(request, env, portfolioId);
+      if (accessError) return accessError;
+      if (!env.SNAPSHOT_QUEUE) {
+        return json({ error: "Server misconfiguration: SNAPSHOT_QUEUE binding is missing" }, 500);
+      }
+
+      const { error } = await db(env)
+        .from("transactions")
+        .delete()
+        .eq("id", txnId)
+        .eq("portfolio_id", portfolioId);
+      if (error) return json({ error: error.message }, 500);
+      await rebuildCurrentHoldings(env, portfolioId);
+      await env.SNAPSHOT_QUEUE.send({ type: "full_rebuild", portfolio_id: portfolioId });
+      return json({ deleted: txnId });
+    }
+
     // Holdings
     if (pathname === "/api/holdings") {
       if (method === "GET") {
@@ -1498,24 +2226,7 @@ export default {
       if (!q) return json([]);
 
       try {
-        const searchUrl = new URL("https://query1.finance.yahoo.com/v1/finance/search");
-        searchUrl.searchParams.set("q", q);
-        searchUrl.searchParams.set("quotesCount", "10");
-        searchUrl.searchParams.set("newsCount", "0");
-        searchUrl.searchParams.set("enableFuzzyQuery", "false");
-        searchUrl.searchParams.set("enableEnhancedTrivialQuery", "true");
-
-        const result = await fetchJson<YahooSearchResponse>(searchUrl.toString());
-        const quotes = (result.quotes || [])
-          .filter((quote) => quote.symbol)
-          .map((quote) => ({
-            ticker: quote.symbol || "",
-            name: quote.shortname || quote.longname || quote.symbol || "",
-            exchange: quote.exchange || quote.fullExchangeName || "N/A",
-            assetType: quote.quoteType || "N/A",
-          }))
-          .slice(0, 10);
-        return json(quotes);
+        return json(await searchYahooAssets(q));
       } catch (error) {
         return json({ error: error instanceof Error ? error.message : "Search failed" }, 500);
       }
@@ -1954,9 +2665,29 @@ export default {
     } catch (error) {
       console.error("scheduled fanout failed", error);
     }
+    try {
+      await enqueueDailySnapshotsForClosedMarkets(env, controller.scheduledTime);
+    } catch (error) {
+      console.error("daily snapshot fanout failed", error);
+    }
   },
-  async queue(batch: MessageBatch<AgentRunQueueMessage>, env: Env): Promise<void> {
+  async queue(batch: MessageBatch<WorkerQueueMessage>, env: Env): Promise<void> {
     for (const message of batch.messages) {
+      if (isSnapshotQueueMessage(message.body)) {
+        try {
+          if (message.body.type === "full_rebuild") {
+            await recomputeSnapshots(env, message.body.portfolio_id);
+          } else {
+            await appendTodaySnapshot(env, message.body.portfolio_id);
+          }
+          message.ack();
+        } catch (error) {
+          console.error(`snapshot queue failed for portfolio ${message.body.portfolio_id}`, error);
+          message.retry();
+        }
+        continue;
+      }
+
       const runId = message.body.runId;
       try {
         const guardrails = createGuardrailState();
@@ -2312,4 +3043,4 @@ export default {
       }
     }
   },
-} satisfies ExportedHandler<Env, AgentRunQueueMessage>;
+} satisfies ExportedHandler<Env, WorkerQueueMessage>;

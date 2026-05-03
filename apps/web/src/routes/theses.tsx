@@ -51,8 +51,7 @@ const PERIOD_FILTERS: PeriodFilter[] = ["All", "Last week", "Last month"];
 
 type SortOrder = "desc" | "asc";
 const API_BASE_URL =
-  import.meta.env.VITE_API_URL ??
-  "https://binturong-api.nikita-osminine.workers.dev";
+  import.meta.env.VITE_API_URL ?? "https://binturong-api.nikita-osminine.workers.dev";
 
 export default function ThesesPage() {
   const { theses, openDrawer, openModal } = useOutletContext<ThesisContext>();
@@ -115,10 +114,7 @@ export default function ThesesPage() {
   }, [user?.id, theses]);
 
   const insights = useMemo(
-    () =>
-      [...agentInsights, ...insightFromTheses(theses)].sort(
-        (a, b) => a.hoursAgo - b.hoursAgo,
-      ),
+    () => [...agentInsights, ...insightFromTheses(theses)].sort((a, b) => a.hoursAgo - b.hoursAgo),
     [agentInsights, theses],
   );
 
@@ -193,249 +189,282 @@ export default function ThesesPage() {
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
       <PrimaryTabs />
       <div className="flex min-h-0 flex-1 flex-col px-6 pt-4">
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
-      <div className="grid shrink-0 grid-cols-1 items-end border-b border-hairline pb-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-        <div className="space-y-4">
-          <TakePageHeader />
-          <div className="flex justify-end">
-            <Button size="sm" onClick={() => openModal()}>
-              <Plus className="h-3.5 w-3.5 mr-1.5" />
-              New take
-            </Button>
+        <div className="flex min-h-0 flex-1 flex-col gap-4">
+          <div className="grid shrink-0 grid-cols-1 items-end border-b border-hairline pb-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+            <div className="space-y-4">
+              <TakePageHeader />
+              <div className="flex justify-end">
+                <Button size="sm" onClick={() => openModal()}>
+                  <Plus className="h-3.5 w-3.5 mr-1.5" />
+                  New take
+                </Button>
+              </div>
+            </div>
+            <div className="hidden xl:block" />
           </div>
-        </div>
-        <div className="hidden xl:block" />
-      </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 pb-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-        <section className="overflow-y-auto rounded-xl border border-border/50 bg-card p-4">
-          <TakeKpiSummary
-            theses={theses}
-            insights={insights}
-            onJumpToAtRisk={() => {
-              setFeedFilter("At risk");
-              setSelectedThesis(null);
-            }}
-          />
-
-          <TakeToolbar
-            tabs={FILTER_TABS}
-            selectedFilter={filter}
-            onFilterChange={setFilter}
-            search={search}
-            onSearchChange={setSearch}
-          />
-
-          <div className="mt-3 flex flex-col gap-2">
-            {filteredTheses.map((thesis) => (
-              <TakeThesisCard
-                key={thesis.id}
-                thesis={thesis}
-                signals={signalsFor(thesis.id, insights)}
-                selected={selectedThesis === thesis.id}
-                highlighted={highlightedThesis === thesis.id}
-                onOpen={() => {
-                  setSelectedThesis((prev) => (prev === thesis.id ? null : thesis.id));
-                  openDrawer(thesis.id);
-                  setSelectedInsight(null);
+          <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 pb-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+            <section className="overflow-y-auto rounded-xl border border-border/50 bg-card p-4">
+              <TakeKpiSummary
+                theses={theses}
+                insights={insights}
+                onJumpToAtRisk={() => {
+                  setFeedFilter("At risk");
+                  setSelectedThesis(null);
                 }}
               />
-            ))}
-          </div>
-        </section>
 
-        <section className="flex min-h-0 flex-col overflow-y-auto rounded-xl border border-border/50 bg-card p-5">
-          <div className="mb-4 flex items-start justify-between">
-            <div>
-              <h2 className="flex items-center gap-2 text-lg font-semibold">
-                Trace feed
-                <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0" aria-hidden="true">
-                  <defs>
-                    <filter id="bisect-glow" x="-50%" y="-50%" width="200%" height="200%">
-                      <feGaussianBlur stdDeviation="1.4" result="blur"/>
-                      <feMerge>
-                        <feMergeNode in="blur"/>
-                        <feMergeNode in="SourceGraphic"/>
-                      </feMerge>
-                    </filter>
-                  </defs>
-                  <circle cx="9" cy="9" r="5.5" fill="white" fillOpacity="0.92" filter="url(#bisect-glow)"/>
-                  <line x1="9" y1="0" x2="9" y2="18" stroke="var(--background)" strokeWidth="1.2"/>
-                </svg>
-              </h2>
-              <p className="text-xs text-muted-foreground">
-                Signals mapped to your theses — review and act with context.
-              </p>
-            </div>
-            <span className="rounded-md border border-border/50 bg-muted px-2 py-1 text-[10px] text-muted-foreground">
-              Live · {visibleInsights.length}
-            </span>
-          </div>
+              <TakeToolbar
+                tabs={FILTER_TABS}
+                selectedFilter={filter}
+                onFilterChange={setFilter}
+                search={search}
+                onSearchChange={setSearch}
+              />
 
-          {selectedThesisObj && (
-            <div className="mb-3 flex items-center gap-2 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs">
-              <span className="text-primary">Scoped to:</span>
-              <span className="font-medium">{selectedThesisObj.title}</span>
-              <button
-                onClick={() => setSelectedThesis(null)}
-                className="ml-auto flex items-center gap-1 text-primary hover:opacity-80"
-                aria-label="Clear scope"
-              >
-                <X className="h-3 w-3" />
-                Clear
-              </button>
-            </div>
-          )}
-
-          <div className="mb-3 flex flex-wrap items-center gap-3">
-            {/* Sentiment */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] uppercase tracking-wider text-foreground-muted">Sentiment</span>
-              <div className="flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
-                {FEED_FILTERS.map((status) => (
-                  <button
-                    key={status}
-                    onClick={() => setFeedFilter(status)}
-                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
-                      feedFilter === status
-                        ? "bg-accent-teal text-primary-foreground"
-                        : "text-foreground-muted hover:text-foreground"
-                    }`}
-                  >
-                    {status}
-                  </button>
+              <div className="mt-3 flex flex-col gap-2">
+                {filteredTheses.map((thesis) => (
+                  <TakeThesisCard
+                    key={thesis.id}
+                    thesis={thesis}
+                    signals={signalsFor(thesis.id, insights)}
+                    selected={selectedThesis === thesis.id}
+                    highlighted={highlightedThesis === thesis.id}
+                    onOpen={() => {
+                      setSelectedThesis((prev) => (prev === thesis.id ? null : thesis.id));
+                      openDrawer(thesis.id);
+                      setSelectedInsight(null);
+                    }}
+                  />
                 ))}
               </div>
-            </div>
+            </section>
 
-            {/* Source */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] uppercase tracking-wider text-foreground-muted">Source</span>
-              <div className="flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
-                {(["all", "agent", "market"] as const).map((source) => (
-                  <button
-                    key={source}
-                    onClick={() => setSourceFilter(source)}
-                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
-                      sourceFilter === source
-                        ? "bg-accent-teal text-primary-foreground"
-                        : "text-foreground-muted hover:text-foreground"
-                    }`}
-                  >
-                    {source === "all" ? "All" : source === "agent" ? "Agent" : "Market"}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Period */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] uppercase tracking-wider text-foreground-muted">Period</span>
-              <div className="flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
-                {PERIOD_FILTERS.map((period) => (
-                  <button
-                    key={period}
-                    onClick={() => setPeriodFilter(period)}
-                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
-                      periodFilter === period
-                        ? "bg-accent-teal text-primary-foreground"
-                        : "text-foreground-muted hover:text-foreground"
-                    }`}
-                  >
-                    {period}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Sort order */}
-            <div className="ml-auto flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
-              <button
-                onClick={() => setSortOrder("desc")}
-                className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
-                  sortOrder === "desc"
-                    ? "bg-accent-teal text-primary-foreground"
-                    : "text-foreground-muted hover:text-foreground"
-                }`}
-                title="Newest first"
-              >
-                ↓ Newest
-              </button>
-              <button
-                onClick={() => setSortOrder("asc")}
-                className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
-                  sortOrder === "asc"
-                    ? "bg-accent-teal text-primary-foreground"
-                    : "text-foreground-muted hover:text-foreground"
-                }`}
-                title="Oldest first"
-              >
-                ↑ Oldest
-              </button>
-            </div>
-          </div>
-
-          <div ref={feedRef} className="take-scrollbar flex flex-col gap-2 pr-1">
-            {groupedInsights.length === 0 && (
-              <div className="rounded-lg border border-dashed border-border/50 p-8 text-center text-xs text-muted-foreground">
-                No insights match this filter.
-              </div>
-            )}
-
-            {groupedInsights.map(([bucket, items]) => {
-              const collapsed = collapsedBuckets.has(bucket);
-              return (
-                <div
-                  key={bucket}
-                  ref={(el) => { bucketRefs.current.set(bucket, el); }}
-                  className="flex flex-col gap-2"
-                >
-                  <button
-                    onClick={() =>
-                      setCollapsedBuckets((prev) => {
-                        const next = new Set(prev);
-                        next.has(bucket) ? next.delete(bucket) : next.add(bucket);
-                        return next;
-                      })
-                    }
-                    className="sticky top-0 z-10 -mx-1 flex items-center gap-2 bg-card/95 px-1 py-1 text-left backdrop-blur hover:text-primary"
-                    aria-expanded={!collapsed}
-                    aria-label={`${collapsed ? "Expand" : "Collapse"} ${bucket}`}
-                  >
-                    <ChevronRight
-                      className={`h-3 w-3 shrink-0 text-muted-foreground transition-transform ${collapsed ? "" : "rotate-90"}`}
-                    />
-                    <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      {bucket}
-                    </h3>
-                    <span className="text-[10px] text-muted-foreground">· {items.length}</span>
-                    <div className="ml-2 h-px flex-1 bg-border/50" />
-                  </button>
-
-                  {!collapsed && items.map((insight) => (
-                    <TakeInsightCard
-                      key={insight.id}
-                      insight={insight}
-                      thesis={theses.find((thesis) => thesis.id === insight.thesisId)}
-                      selected={selectedInsight === insight.id}
-                      onSelect={() =>
-                        setSelectedInsight((prev) => (prev === insight.id ? null : insight.id))
-                      }
-                      onDismiss={() => setDismissed((prev) => new Set(prev).add(insight.id))}
-                      onThesisClick={() => {
-                        setSelectedThesis((prev) =>
-                          prev === insight.thesisId ? null : insight.thesisId,
-                        );
-                      }}
-                    />
-                  ))}
+            <section className="flex min-h-0 flex-col overflow-y-auto rounded-xl border border-border/50 bg-card p-5">
+              <div className="mb-4 flex items-start justify-between">
+                <div>
+                  <h2 className="flex items-center gap-2 text-lg font-semibold">
+                    Trace feed
+                    <svg
+                      width="18"
+                      height="18"
+                      viewBox="0 0 18 18"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="shrink-0"
+                      aria-hidden="true"
+                    >
+                      <defs>
+                        <filter id="bisect-glow" x="-50%" y="-50%" width="200%" height="200%">
+                          <feGaussianBlur stdDeviation="1.4" result="blur" />
+                          <feMerge>
+                            <feMergeNode in="blur" />
+                            <feMergeNode in="SourceGraphic" />
+                          </feMerge>
+                        </filter>
+                      </defs>
+                      <circle
+                        cx="9"
+                        cy="9"
+                        r="5.5"
+                        fill="white"
+                        fillOpacity="0.92"
+                        filter="url(#bisect-glow)"
+                      />
+                      <line
+                        x1="9"
+                        y1="0"
+                        x2="9"
+                        y2="18"
+                        stroke="var(--background)"
+                        strokeWidth="1.2"
+                      />
+                    </svg>
+                  </h2>
+                  <p className="text-xs text-muted-foreground">
+                    Signals mapped to your theses — review and act with context.
+                  </p>
                 </div>
-              );
-            })}
+                <span className="rounded-md border border-border/50 bg-muted px-2 py-1 text-[10px] text-muted-foreground">
+                  Live · {visibleInsights.length}
+                </span>
+              </div>
+
+              {selectedThesisObj && (
+                <div className="mb-3 flex items-center gap-2 rounded-md border border-foreground/20 bg-foreground/10 px-3 py-1.5 text-xs">
+                  <span className="text-foreground">Scoped to:</span>
+                  <span className="font-medium">{selectedThesisObj.title}</span>
+                  <button
+                    onClick={() => setSelectedThesis(null)}
+                    className="ml-auto flex items-center gap-1 text-foreground hover:opacity-80"
+                    aria-label="Clear scope"
+                  >
+                    <X className="h-3 w-3" />
+                    Clear
+                  </button>
+                </div>
+              )}
+
+              <div className="mb-3 flex flex-wrap items-center gap-3">
+                {/* Sentiment */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] uppercase tracking-wider text-foreground-muted">
+                    Sentiment
+                  </span>
+                  <div className="flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
+                    {FEED_FILTERS.map((status) => (
+                      <button
+                        key={status}
+                        onClick={() => setFeedFilter(status)}
+                        className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                          feedFilter === status
+                            ? "bg-foreground text-background"
+                            : "text-foreground-muted hover:text-foreground"
+                        }`}
+                      >
+                        {status}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Source */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] uppercase tracking-wider text-foreground-muted">
+                    Source
+                  </span>
+                  <div className="flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
+                    {(["all", "agent", "market"] as const).map((source) => (
+                      <button
+                        key={source}
+                        onClick={() => setSourceFilter(source)}
+                        className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                          sourceFilter === source
+                            ? "bg-foreground text-background"
+                            : "text-foreground-muted hover:text-foreground"
+                        }`}
+                      >
+                        {source === "all" ? "All" : source === "agent" ? "Agent" : "Market"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Period */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] uppercase tracking-wider text-foreground-muted">
+                    Period
+                  </span>
+                  <div className="flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
+                    {PERIOD_FILTERS.map((period) => (
+                      <button
+                        key={period}
+                        onClick={() => setPeriodFilter(period)}
+                        className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                          periodFilter === period
+                            ? "bg-foreground text-background"
+                            : "text-foreground-muted hover:text-foreground"
+                        }`}
+                      >
+                        {period}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Sort order */}
+                <div className="ml-auto flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
+                  <button
+                    onClick={() => setSortOrder("desc")}
+                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                      sortOrder === "desc"
+                        ? "bg-foreground text-background"
+                        : "text-foreground-muted hover:text-foreground"
+                    }`}
+                    title="Newest first"
+                  >
+                    ↓ Newest
+                  </button>
+                  <button
+                    onClick={() => setSortOrder("asc")}
+                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                      sortOrder === "asc"
+                        ? "bg-foreground text-background"
+                        : "text-foreground-muted hover:text-foreground"
+                    }`}
+                    title="Oldest first"
+                  >
+                    ↑ Oldest
+                  </button>
+                </div>
+              </div>
+
+              <div ref={feedRef} className="take-scrollbar flex flex-col gap-2 pr-1">
+                {groupedInsights.length === 0 && (
+                  <div className="rounded-lg border border-dashed border-border/50 p-8 text-center text-xs text-muted-foreground">
+                    No insights match this filter.
+                  </div>
+                )}
+
+                {groupedInsights.map(([bucket, items]) => {
+                  const collapsed = collapsedBuckets.has(bucket);
+                  return (
+                    <div
+                      key={bucket}
+                      ref={(el) => {
+                        bucketRefs.current.set(bucket, el);
+                      }}
+                      className="flex flex-col gap-2"
+                    >
+                      <button
+                        onClick={() =>
+                          setCollapsedBuckets((prev) => {
+                            const next = new Set(prev);
+                            next.has(bucket) ? next.delete(bucket) : next.add(bucket);
+                            return next;
+                          })
+                        }
+                        className="sticky top-0 z-10 -mx-1 flex items-center gap-2 bg-card/95 px-1 py-1 text-left backdrop-blur hover:text-foreground"
+                        aria-expanded={!collapsed}
+                        aria-label={`${collapsed ? "Expand" : "Collapse"} ${bucket}`}
+                      >
+                        <ChevronRight
+                          className={`h-3 w-3 shrink-0 text-muted-foreground transition-transform ${collapsed ? "" : "rotate-90"}`}
+                        />
+                        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          {bucket}
+                        </h3>
+                        <span className="text-[10px] text-muted-foreground">· {items.length}</span>
+                        <div className="ml-2 h-px flex-1 bg-border/50" />
+                      </button>
+
+                      {!collapsed &&
+                        items.map((insight) => (
+                          <TakeInsightCard
+                            key={insight.id}
+                            insight={insight}
+                            thesis={theses.find((thesis) => thesis.id === insight.thesisId)}
+                            selected={selectedInsight === insight.id}
+                            onSelect={() =>
+                              setSelectedInsight((prev) =>
+                                prev === insight.id ? null : insight.id,
+                              )
+                            }
+                            onDismiss={() => setDismissed((prev) => new Set(prev).add(insight.id))}
+                            onThesisClick={() => {
+                              setSelectedThesis((prev) =>
+                                prev === insight.thesisId ? null : insight.thesisId,
+                              );
+                            }}
+                          />
+                        ))}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
           </div>
-        </section>
-      </div>
-    </div>
+        </div>
       </div>
     </div>
   );

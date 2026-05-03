@@ -1,5 +1,11 @@
 import { useState, useCallback } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -60,10 +66,7 @@ function parseFlexibleNumber(raw: string | undefined): number {
   if (lastComma > -1 && lastDot > -1) {
     const decimalSeparator = lastComma > lastDot ? "," : ".";
     const thousandsSeparator = decimalSeparator === "," ? "." : ",";
-    const normalized = compact
-      .split(thousandsSeparator)
-      .join("")
-      .replace(decimalSeparator, ".");
+    const normalized = compact.split(thousandsSeparator).join("").replace(decimalSeparator, ".");
     return parseFloat(normalized) || 0;
   }
 
@@ -181,7 +184,9 @@ export function CreateCsvModal({ open, onOpenChange, onCreated }: Props) {
         return;
       }
 
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
       const { data: portfolio, error: pErr } = await supabase
@@ -238,9 +243,7 @@ export function CreateCsvModal({ open, onOpenChange, onCreated }: Props) {
           const query = isin || (exchange ? `${ticker} ${exchange}` : ticker);
           try {
             const res = await fetch(
-              `${API_BASE_URL}/api/market/search?q=${encodeURIComponent(
-                query,
-              )}`,
+              `${API_BASE_URL}/api/market/search?q=${encodeURIComponent(query)}`,
             );
             if (!res.ok) return [lookupKey, null] as const;
             const matches = (await res.json()) as AssetSearchResult[];
@@ -301,31 +304,47 @@ export function CreateCsvModal({ open, onOpenChange, onCreated }: Props) {
         <div className="space-y-4">
           <div className="space-y-1.5">
             <Label>Portfolio name *</Label>
-            <Input placeholder="My Portfolio" value={name} onChange={(e) => setName(e.target.value)} />
+            <Input
+              placeholder="My Portfolio"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
           </div>
           <div className="space-y-1.5">
             <Label>Description</Label>
-            <Input placeholder="Optional description" value={description} onChange={(e) => setDescription(e.target.value)} />
+            <Input
+              placeholder="Optional description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
           </div>
 
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <Label>CSV file *</Label>
-              <button onClick={handleDownloadTemplate} className="flex items-center gap-1 text-xs text-primary hover:underline">
+              <button
+                onClick={handleDownloadTemplate}
+                className="flex items-center gap-1 text-xs text-foreground hover:underline"
+              >
                 <Download className="h-3 w-3" /> Download template
               </button>
             </div>
             <label
-              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
               onDragLeave={() => setDragOver(false)}
               onDrop={handleDrop}
               className={`flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 cursor-pointer transition-colors ${
-                dragOver ? "border-primary bg-primary/5" : "border-border/50 hover:border-primary/30"
+                dragOver
+                  ? "border-foreground bg-foreground/5"
+                  : "border-border/50 hover:border-foreground/30"
               }`}
             >
               {file ? (
                 <div className="flex items-center gap-2 text-sm">
-                  <FileText className="h-4 w-4 text-primary" />
+                  <FileText className="h-4 w-4 text-foreground" />
                   <span>{file.name}</span>
                 </div>
               ) : (
@@ -334,11 +353,20 @@ export function CreateCsvModal({ open, onOpenChange, onCreated }: Props) {
                   <p className="text-sm text-muted-foreground">Drop a CSV or click to browse</p>
                 </>
               )}
-              <input type="file" accept=".csv" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+              <input
+                type="file"
+                accept=".csv"
+                className="hidden"
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+              />
             </label>
           </div>
 
-          <Button onClick={handleSubmit} disabled={!name.trim() || !file || loading} className="w-full">
+          <Button
+            onClick={handleSubmit}
+            disabled={!name.trim() || !file || loading}
+            className="w-full"
+          >
             {loading ? "Creating..." : "Create portfolio"}
           </Button>
         </div>

@@ -17,6 +17,15 @@ const PALETTE = [
   "var(--alloc-6)",
 ];
 
+const TEXT_PALETTE = [
+  "var(--alloc-1-text)",
+  "var(--alloc-2-text)",
+  "var(--alloc-3-text)",
+  "var(--alloc-4-text)",
+  "var(--alloc-5-text)",
+  "var(--alloc-6-text)",
+];
+
 type ContentProps = {
   x?: number;
   y?: number;
@@ -31,12 +40,17 @@ type ContentProps = {
 function TreemapNode(props: ContentProps) {
   const { x = 0, y = 0, width = 0, height = 0, index = 0, name, value = 0, total } = props;
   const fill = PALETTE[index % PALETTE.length];
+  const textFill = TEXT_PALETTE[index % TEXT_PALETTE.length];
   const pct = total > 0 ? (value / total) * 100 : 0;
-  const showLabel = width > 60 && height > 36;
-  const showPct = width > 50 && height > 24;
+  const showLabel = width > 44 && height > 22;
+  const showPct = showLabel && width > 64 && height > 38;
+  const clipId = `clip-alloc-${index}`;
 
   return (
     <g>
+      <clipPath id={clipId}>
+        <rect x={x + 2} y={y + 2} width={Math.max(0, width - 4)} height={Math.max(0, height - 4)} />
+      </clipPath>
       <rect
         x={x}
         y={y}
@@ -44,16 +58,17 @@ function TreemapNode(props: ContentProps) {
         height={height}
         rx={6}
         ry={6}
-        style={{ fill, fillOpacity: 0.9, stroke: "var(--background)", strokeWidth: 2 }}
+        style={{ fill, stroke: "var(--background)", strokeWidth: 2 }}
       />
       {showLabel && (
         <text
           x={x + 10}
-          y={y + 18}
-          fill="oklch(0.16 0.012 240)"
+          y={y + (showPct ? 17 : Math.min(18, height - 8))}
+          fill={textFill}
           fontSize={11}
-          fontWeight={600}
+          fontWeight={500}
           fontFamily="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+          clipPath={`url(#${clipId})`}
           style={{ pointerEvents: "none" }}
         >
           {name}
@@ -63,11 +78,12 @@ function TreemapNode(props: ContentProps) {
         <text
           x={x + 10}
           y={y + (showLabel ? 32 : 18)}
-          fill="oklch(0.16 0.012 240)"
+          fill={textFill}
           fontSize={10}
-          fontWeight={500}
+          fontWeight={400}
           fontFamily="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
           fillOpacity={0.8}
+          clipPath={`url(#${clipId})`}
           style={{ pointerEvents: "none" }}
         >
           {pct.toFixed(1)}%

@@ -50,7 +50,7 @@ export function TakeKpiSummary({ theses, insights, onJumpToAtRisk }: TakeKpiSumm
             </span>
           </span>
           {newSinceLastVisit > 0 && (
-            <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+            <span className="rounded-full bg-foreground/10 px-1.5 py-0.5 text-[10px] font-medium text-foreground">
               {newSinceLastVisit} new
             </span>
           )}
