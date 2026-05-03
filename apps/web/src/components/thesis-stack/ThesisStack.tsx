@@ -25,8 +25,8 @@ export function ThesisStack({ theses, onUpdate, onOpen }: Props) {
           Theses
         </div>
         <p className="mt-3">
-          No theses linked to this portfolio yet. Add one from The Take and link it to a
-          ticker in this portfolio.
+          No theses linked to this portfolio yet. Add one from The Take and link it to a ticker in
+          this portfolio.
         </p>
       </div>
     );
@@ -105,7 +105,7 @@ export function ThesisStack({ theses, onUpdate, onOpen }: Props) {
             })}
             <span
               aria-hidden
-              className="pointer-events-none absolute inset-x-8 -bottom-2 h-6 rounded-full bg-primary/0 blur-2xl transition-colors duration-300 group-hover:bg-primary/20"
+              className="pointer-events-none absolute inset-x-8 -bottom-2 h-6 rounded-full bg-foreground/0 blur-2xl transition-colors duration-300 group-hover:bg-foreground/10"
             />
           </motion.button>
         ) : (

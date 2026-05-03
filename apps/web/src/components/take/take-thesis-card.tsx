@@ -10,7 +10,7 @@ const STATUS_LABELS: Record<ThesisStatus, string> = {
 };
 
 const STATUS_CLASSES: Record<ThesisStatus, string> = {
-  active: "bg-primary/15 text-primary",
+  active: "bg-foreground/10 text-foreground",
   "playing-out": "bg-positive/15 text-positive",
   invalidated: "bg-negative/15 text-negative",
   closed: "bg-muted text-muted-foreground",
@@ -59,9 +59,9 @@ export function TakeThesisCard({
       onClick={onOpen}
       className={`text-left rounded-lg border p-4 transition-colors space-y-3 cursor-pointer ${
         selected
-          ? "border-primary/50 bg-primary/5"
+          ? "border-foreground/40 bg-foreground/5"
           : highlighted
-            ? "border-primary/30 bg-card"
+            ? "border-foreground/25 bg-card"
             : "border-border/50 bg-card hover:border-border"
       }`}
     >
@@ -104,7 +104,7 @@ export function TakeThesisCard({
           )}
           <span className="text-muted-foreground">· {signals.total} signals</span>
           {signals.newCount > 0 && (
-            <span className="ml-auto rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
+            <span className="ml-auto rounded-full bg-foreground/10 px-1.5 py-0.5 text-[9px] font-medium text-foreground">
               {signals.newCount} new
             </span>
           )}

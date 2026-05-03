@@ -18,15 +18,11 @@ type NavGroup = {
 const GROUPS: NavGroup[] = [
   {
     label: null,
-    items: [
-      { to: "/portfolios", label: "Portfolio", icon: <BarChart3 className="h-4 w-4" /> },
-    ],
+    items: [{ to: "/portfolios", label: "Portfolio", icon: <BarChart3 className="h-4 w-4" /> }],
   },
   {
     label: "Settings",
-    items: [
-      { to: "/settings", label: "Settings", icon: <Settings className="h-4 w-4" /> },
-    ],
+    items: [{ to: "/settings", label: "Settings", icon: <Settings className="h-4 w-4" /> }],
   },
 ];
 
@@ -97,15 +93,11 @@ export function AppSidebar({ children }: { children: ReactNode }) {
                           title={collapsed ? item.label : undefined}
                           className={`flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${
                             active
-                              ? "bg-accent-teal/12 text-foreground"
+                              ? "bg-foreground/10 text-foreground"
                               : "text-foreground-muted hover:bg-surface-2 hover:text-foreground"
                           } ${collapsed ? "justify-center" : ""}`}
                         >
-                          <span
-                            className={`grid h-5 w-5 shrink-0 place-items-center ${
-                              active ? "text-accent-teal" : ""
-                            }`}
-                          >
+                          <span className="grid h-5 w-5 shrink-0 place-items-center">
                             {item.icon}
                           </span>
                           {!collapsed && <span className="truncate">{item.label}</span>}
@@ -123,7 +115,7 @@ export function AppSidebar({ children }: { children: ReactNode }) {
         <div
           className={`flex flex-col gap-1 border-t border-hairline p-2 ${collapsed ? "items-center" : ""}`}
         >
-          {!collapsed && <ThemeSwitcher />}
+          <ThemeSwitcher compact={collapsed} />
           <button
             type="button"
             onClick={handleSignOut}

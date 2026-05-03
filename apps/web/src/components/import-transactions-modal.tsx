@@ -168,13 +168,13 @@ export function ImportTransactionsModal({ open, onOpenChange, portfolioId, onImp
               onDrop={handleDrop}
               className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 transition-colors ${
                 dragOver
-                  ? "border-primary bg-primary/5"
-                  : "border-border/50 hover:border-primary/30"
+                  ? "border-foreground bg-foreground/5"
+                  : "border-border/50 hover:border-foreground/30"
               }`}
             >
               {file ? (
                 <div className="flex items-center gap-2 text-sm">
-                  <FileText className="h-4 w-4 text-primary" />
+                  <FileText className="h-4 w-4 text-foreground" />
                   <span>{file.name}</span>
                 </div>
               ) : (

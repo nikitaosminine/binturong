@@ -39,8 +39,11 @@ export function TakeBadge({ theses, onOpen, onCreate }: TakeBadgeProps) {
   return (
     <div ref={ref} className="relative inline-block">
       <button
-        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        className="inline-flex items-center justify-center h-5 min-w-5 px-1.5 rounded bg-primary/15 text-primary text-xs font-medium hover:bg-primary/25 transition-colors"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-foreground/10 px-1.5 text-xs font-medium text-foreground transition-colors hover:bg-foreground/15"
       >
         {theses.length}
       </button>
@@ -49,7 +52,11 @@ export function TakeBadge({ theses, onOpen, onCreate }: TakeBadgeProps) {
           {theses.map((t) => (
             <button
               key={t.id}
-              onClick={(e) => { e.stopPropagation(); setOpen(false); onOpen(t.id); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpen(false);
+                onOpen(t.id);
+              }}
               className="w-full text-left px-2.5 py-1.5 rounded text-xs hover:bg-muted/50 transition-colors"
             >
               <span className="font-medium text-foreground line-clamp-1">{t.title}</span>

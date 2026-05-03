@@ -263,7 +263,7 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
               onClick={() => setView(item)}
               className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
                 view === item
-                  ? "bg-accent-teal text-primary-foreground"
+                  ? "bg-foreground text-background"
                   : "text-foreground-muted hover:text-foreground"
               }`}
             >
@@ -292,7 +292,7 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
                 onClick={() => setMode(id)}
                 className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
                   mode === id
-                    ? "bg-accent-teal text-primary-foreground"
+                    ? "bg-foreground text-background"
                     : "text-foreground-muted hover:text-foreground"
                 }`}
               >
@@ -316,7 +316,7 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
                   onClick={() => setRange(item.id)}
                   className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
                     range === item.id
-                      ? "bg-accent-teal text-primary-foreground"
+                      ? "bg-foreground text-background"
                       : "text-foreground-muted hover:text-foreground"
                   }`}
                 >
@@ -331,7 +331,7 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
                   onClick={() => setBarPeriod(item.id)}
                   className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
                     barPeriod === item.id
-                      ? "bg-accent-teal text-primary-foreground"
+                      ? "bg-foreground text-background"
                       : "text-foreground-muted hover:text-foreground"
                   }`}
                 >
@@ -389,8 +389,8 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
           <AreaChart data={lineData} margin={{ left: 0, right: 0, top: 4, bottom: 0 }}>
             <defs>
               <linearGradient id="fillValue" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="var(--accent-teal)" stopOpacity={0.35} />
-                <stop offset="95%" stopColor="var(--accent-teal)" stopOpacity={0.02} />
+                <stop offset="5%" stopColor="var(--chart-accent)" stopOpacity={0.25} />
+                <stop offset="95%" stopColor="var(--chart-accent)" stopOpacity={0.02} />
               </linearGradient>
             </defs>
             <CartesianGrid vertical={false} stroke="var(--hairline)" />
@@ -414,7 +414,7 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
               tickFormatter={(value: number) => fmtValue(value, mode)}
             />
             <ChartTooltip
-              cursor={{ stroke: "var(--accent-teal)", strokeOpacity: 0.4, strokeDasharray: "3 3" }}
+              cursor={{ stroke: "var(--chart-accent)", strokeOpacity: 0.4, strokeDasharray: "3 3" }}
               content={
                 <ChartTooltipContent
                   labelFormatter={(value: string) =>
@@ -433,12 +433,12 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
               dataKey="value"
               type="natural"
               fill="url(#fillValue)"
-              stroke="var(--accent-teal)"
+              stroke="var(--chart-accent)"
               strokeWidth={2}
               dot={false}
               activeDot={{
                 r: 5,
-                fill: "var(--accent-teal)",
+                fill: "var(--chart-accent)",
                 stroke: "var(--background)",
                 strokeWidth: 2,
               }}

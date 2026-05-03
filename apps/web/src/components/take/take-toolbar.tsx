@@ -33,7 +33,7 @@ export function TakeToolbar({
             onClick={() => onFilterChange(tab.value)}
             className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
               selectedFilter === tab.value
-                ? "bg-accent-teal text-primary-foreground"
+                ? "bg-foreground text-background"
                 : "text-foreground-muted hover:text-foreground"
             }`}
           >

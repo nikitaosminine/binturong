@@ -44,12 +44,10 @@ export function PrimaryTabs() {
                 active ? "text-foreground" : "text-foreground-muted hover:text-foreground"
               }`}
             >
-              <span className={active ? "text-accent-teal" : "text-foreground-muted"}>
-                {t.icon}
-              </span>
+              <span className={active ? "text-foreground" : "text-foreground-muted"}>{t.icon}</span>
               {t.label}
               {active && (
-                <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-accent-teal" />
+                <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-foreground" />
               )}
             </Link>
           );

@@ -488,7 +488,7 @@ export default function PortfolioDetailPage() {
         <p className="text-foreground-muted">Portfolio not found</p>
         <Link
           to="/portfolios"
-          className="mt-2 inline-block text-sm text-accent-teal hover:underline"
+          className="mt-2 inline-block text-sm text-foreground hover:underline"
         >
           Back to portfolios
         </Link>
@@ -785,7 +785,7 @@ export default function PortfolioDetailPage() {
                                               size="icon"
                                               className={`h-8 w-8 rounded-md border border-hairline bg-surface-2 transition-colors ${
                                                 copiedId === r.id
-                                                  ? "border-accent-teal/40 text-accent-teal"
+                                                  ? "border-foreground/40 text-foreground"
                                                   : "text-foreground-muted"
                                               }`}
                                               onClick={() => copyIsin(r.id, r.isin)}

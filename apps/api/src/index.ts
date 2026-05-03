@@ -201,6 +201,8 @@ interface YahooChartResponse {
       meta?: {
         regularMarketPrice?: number | null;
         previousClose?: number | null;
+        instrumentType?: string | null;
+        quoteType?: string | null;
       };
       timestamp?: number[];
       indicators?: {
@@ -828,7 +830,7 @@ function isSnapshotQueueMessage(message: WorkerQueueMessage): message is Snapsho
 async function fetchHistoricalPrices(
   ticker: string,
   firstDate: Date,
-): Promise<Map<string, number>> {
+): Promise<{ prices: Map<string, number>; type: string | null }> {
   const period1 = Math.floor(firstDate.getTime() / 1000);
   const period2 = Math.floor(Date.now() / 1000);
   const url = new URL(`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}`);
@@ -839,6 +841,9 @@ async function fetchHistoricalPrices(
 
   const chart = await fetchJson<YahooChartResponse>(url.toString());
   const result = chart.chart?.result?.[0];
+  const instrumentType = normalizeYahooInstrumentType(
+    result?.meta?.instrumentType ?? result?.meta?.quoteType ?? null,
+  );
   const timestamps = result?.timestamp ?? [];
   const closes = result?.indicators?.quote?.[0]?.close ?? [];
   const dateMap = new Map<string, number>();
@@ -849,26 +854,31 @@ async function fetchHistoricalPrices(
     dateMap.set(toDateString(new Date(ts * 1000)), close);
   });
 
-  return dateMap;
+  return { prices: dateMap, type: instrumentType };
 }
 
 async function getPricesByTicker(
   env: Env,
   tickers: string[],
   firstDate: Date,
-): Promise<Map<string, Map<string, number>>> {
+): Promise<{
+  pricesByTicker: Map<string, Map<string, number>>;
+  typeByTicker: Map<string, string>;
+}> {
   const client = db(env);
   const allPriceRows: Array<{ yahoo_ticker: string; date: string; closing_price: number }> = [];
+  const typeByTicker = new Map<string, string>();
   const entries = await Promise.all(
     tickers.map(async (ticker) => {
       try {
-        const dateMap = await fetchHistoricalPrices(ticker, firstDate);
+        const { prices: dateMap, type } = await fetchHistoricalPrices(ticker, firstDate);
         const priceRows = [...dateMap.entries()].map(([date, closing_price]) => ({
           yahoo_ticker: ticker,
           date,
           closing_price,
         }));
         allPriceRows.push(...priceRows);
+        if (type) typeByTicker.set(ticker.toUpperCase(), type);
         return [ticker, dateMap] as const;
       } catch (error) {
         console.error(`price fetch failed for ${ticker}`, error);
@@ -881,7 +891,15 @@ async function getPricesByTicker(
       onConflict: "yahoo_ticker,date",
     });
   }
-  return new Map(entries);
+  return { pricesByTicker: new Map(entries), typeByTicker };
+}
+
+function normalizeYahooInstrumentType(value: string | null | undefined): string | null {
+  const instrumentType = value?.trim().toUpperCase();
+  if (!instrumentType) return null;
+  if (instrumentType === "ETF") return "ETF";
+  if (instrumentType === "EQUITY" || instrumentType === "STOCK") return "Equity";
+  return instrumentType;
 }
 
 function getCarryForwardPrice(dateMap: Map<string, number> | undefined, dateStr: string): number {
@@ -920,7 +938,11 @@ async function loadPortfolioTransactions(env: Env, portfolioId: string): Promise
   }));
 }
 
-async function rebuildCurrentHoldings(env: Env, portfolioId: string): Promise<void> {
+async function rebuildCurrentHoldings(
+  env: Env,
+  portfolioId: string,
+  typeByTicker: Map<string, string> = new Map(),
+): Promise<void> {
   const client = db(env);
   const txns = await loadPortfolioTransactions(env, portfolioId);
   const lots = new Map<
@@ -975,7 +997,7 @@ async function rebuildCurrentHoldings(env: Env, portfolioId: string): Promise<vo
     purchase_price: lot.quantity > 0 ? lot.cost / lot.quantity : 0,
     quantity: lot.quantity,
     fees: 0,
-    asset_type: null,
+    asset_type: typeByTicker.get(lot.ticker.toUpperCase()) ?? "Other",
   }));
   if (holdingRows.length > 0) await client.from("holdings").insert(holdingRows);
   await client.from("portfolios").update({ cash_value: cashValue }).eq("id", portfolioId);
@@ -1017,9 +1039,9 @@ async function recomputeSnapshots(env: Env, portfolioId: string): Promise<void> 
   const client = db(env);
   const txns = await loadPortfolioTransactions(env, portfolioId);
   console.log("[recompute] transactions fetched:", txns.length);
-  await rebuildCurrentHoldings(env, portfolioId);
 
   if (txns.length === 0) {
+    await rebuildCurrentHoldings(env, portfolioId);
     await client.from("portfolio_snapshots").delete().eq("portfolio_id", portfolioId);
     console.log("[recompute] snapshots built:", 0);
     console.log("[recompute] insert result:", JSON.stringify(null));
@@ -1030,7 +1052,8 @@ async function recomputeSnapshots(env: Env, portfolioId: string): Promise<void> 
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
   const tickers = Array.from(new Set(txns.map((txn) => txn.yahoo_ticker).filter(Boolean))) as string[];
-  const pricesByTicker = await getPricesByTicker(env, tickers, firstDate);
+  const { pricesByTicker, typeByTicker } = await getPricesByTicker(env, tickers, firstDate);
+  await rebuildCurrentHoldings(env, portfolioId, typeByTicker);
   const snapshots: Array<{
     portfolio_id: string;
     date: string;
@@ -1069,7 +1092,11 @@ async function appendTodaySnapshot(env: Env, portfolioId: string): Promise<void>
   today.setUTCHours(0, 0, 0, 0);
   const date = toDateString(today);
   const tickers = Array.from(new Set(txns.map((txn) => txn.yahoo_ticker).filter(Boolean))) as string[];
-  const pricesByTicker = await getPricesByTicker(env, tickers, new Date(Date.now() - 3 * 24 * 60 * 60 * 1000));
+  const { pricesByTicker, typeByTicker } = await getPricesByTicker(
+    env,
+    tickers,
+    new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+  );
   await db(env).from("portfolio_snapshots").upsert(
     {
       portfolio_id: portfolioId,
@@ -1078,7 +1105,7 @@ async function appendTodaySnapshot(env: Env, portfolioId: string): Promise<void>
     },
     { onConflict: "portfolio_id,date" },
   );
-  await rebuildCurrentHoldings(env, portfolioId);
+  await rebuildCurrentHoldings(env, portfolioId, typeByTicker);
 }
 
 async function enqueueDailySnapshotsForClosedMarkets(env: Env, scheduledTime: number): Promise<void> {
