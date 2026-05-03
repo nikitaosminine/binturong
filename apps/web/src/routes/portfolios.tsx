@@ -277,7 +277,7 @@ export default function PortfoliosPage() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="mx-auto max-w-5xl space-y-6 px-6 py-6">
       <div className="flex items-end justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Portfolios</h1>

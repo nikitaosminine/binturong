@@ -1,4 +1,4 @@
-import { AlertTriangle, Eye, TrendingDown, TrendingUp, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, Eye, TrendingDown, TrendingUp, X } from "lucide-react";
 import { Thesis } from "@/lib/thesis";
 import { TakeInsight, formatTime } from "@/components/take/take-feed";
 
@@ -75,7 +75,7 @@ export function TakeInsightCard({
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <span className="text-[11px] text-muted-foreground">
               {formatTime(insight.hoursAgo)}
             </span>
@@ -89,43 +89,52 @@ export function TakeInsightCard({
             >
               <X className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
             </button>
+            <ChevronDown
+              className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${selected ? "rotate-180" : ""}`}
+            />
           </div>
         </div>
 
-        <h3 className="mt-2 text-sm font-semibold">{insight.headline}</h3>
-        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{insight.body}</p>
-        {insight.deltaSummary && (
-          <p className="mt-1 text-[11px] text-primary/90">What changed: {insight.deltaSummary}</p>
-        )}
-        {insight.questionsForUser && insight.questionsForUser.length > 0 && (
-          <div className="mt-2 rounded-md border border-border/60 bg-muted/30 p-2">
-            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Questions for you</p>
-            <ul className="mt-1 list-disc pl-4 text-[11px] text-foreground/90">
-              {insight.questionsForUser.slice(0, 2).map((question, index) => (
-                <li key={`${question}-${index}`}>{question}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-        {insight.evidenceIds && insight.evidenceIds.length > 0 && (
-          <p className="mt-1 text-[10px] text-muted-foreground">
-            Evidence links: {insight.evidenceIds.length}
-          </p>
-        )}
+        <h3 className={`mt-2 text-sm font-semibold ${selected ? "" : "line-clamp-1"}`}>
+          {insight.headline}
+        </h3>
 
-        {thesis && (
-          <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <span>Linked thesis:</span>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onThesisClick();
-              }}
-              className="rounded px-1 text-foreground underline-offset-2 hover:bg-muted hover:underline"
-            >
-              {thesis.title}
-            </button>
-          </div>
+        {selected && (
+          <>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{insight.body}</p>
+            {insight.deltaSummary && (
+              <p className="mt-1 text-[11px] text-primary/90">What changed: {insight.deltaSummary}</p>
+            )}
+            {insight.questionsForUser && insight.questionsForUser.length > 0 && (
+              <div className="mt-2 rounded-md border border-border/60 bg-muted/30 p-2">
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Questions for you</p>
+                <ul className="mt-1 list-disc pl-4 text-[11px] text-foreground/90">
+                  {insight.questionsForUser.slice(0, 2).map((question, index) => (
+                    <li key={`${question}-${index}`}>{question}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {insight.evidenceIds && insight.evidenceIds.length > 0 && (
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                Evidence links: {insight.evidenceIds.length}
+              </p>
+            )}
+            {thesis && (
+              <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <span>Linked thesis:</span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onThesisClick();
+                  }}
+                  className="rounded px-1 text-foreground underline-offset-2 hover:bg-muted hover:underline"
+                >
+                  {thesis.title}
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
     </article>

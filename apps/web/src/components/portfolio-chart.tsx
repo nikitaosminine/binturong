@@ -1,6 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { AreaSeries, createChart } from "lightweight-charts";
-import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { useMemo, useState } from "react";
+import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart";
 
 export interface PortfolioChartPoint {
   time: string;
@@ -23,160 +28,117 @@ const DEFAULT_DATA: PortfolioChartPoint[] = [
   { time: "2026-04-17", value: 111400 },
 ];
 
-type Range = "1W" | "1M" | "3M" | "1Y" | "ALL";
+type Range = "1M" | "3M" | "1Y" | "ALL";
 
-function filterDataByRange(points: PortfolioChartPoint[], range: Range): PortfolioChartPoint[] {
-  if (range === "ALL" || points.length === 0) return points;
+const RANGES: { id: Range; label: string; days: number | null }[] = [
+  { id: "1M", label: "Monthly", days: 30 },
+  { id: "3M", label: "Quarterly", days: 90 },
+  { id: "1Y", label: "Yearly", days: 365 },
+  { id: "ALL", label: "All time", days: null },
+];
 
-  const lastDate = new Date(points[points.length - 1].time);
-  const from = new Date(lastDate);
+const chartConfig = {
+  value: {
+    label: "Portfolio value",
+    color: "var(--accent-teal)",
+  },
+} satisfies ChartConfig;
 
-  if (range === "1W") from.setDate(from.getDate() - 7);
-  if (range === "1M") from.setMonth(from.getMonth() - 1);
-  if (range === "3M") from.setMonth(from.getMonth() - 3);
-  if (range === "1Y") from.setFullYear(from.getFullYear() - 1);
-
-  return points.filter((point) => new Date(point.time) >= from);
+function fmt$(n: number) {
+  return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
 
 export function PortfolioChart({ data }: PortfolioChartProps) {
-  const [range, setRange] = useState<Range>("1M");
-  const [chartUnavailable, setChartUnavailable] = useState(false);
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [range, setRange] = useState<Range>("ALL");
   const points = data?.length ? data : DEFAULT_DATA;
 
-  const filteredData = useMemo(() => filterDataByRange(points, range), [points, range]);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    let remove = false;
-    let frameId = 0;
-    let chart: {
-      remove: () => void;
-      applyOptions: (options: { width: number }) => void;
-      addSeries: (
-        definition: unknown,
-        opts: Record<string, unknown>,
-      ) => { setData: (data: unknown[]) => void };
-      timeScale: () => { fitContent: () => void };
-    } | null = null;
-    let resizeObserver: ResizeObserver | null = null;
-
-    const setup = () => {
-      if (remove || !container) return;
-      if (container.clientWidth === 0 || container.clientHeight === 0) return;
-
-      try {
-        chart = createChart(container, {
-          width: container.clientWidth,
-          height: 300,
-          layout: {
-            background: { color: "transparent" },
-            textColor: "#A1A1AA",
-            attributionLogo: false,
-          },
-          grid: {
-            vertLines: { color: "rgba(255, 255, 255, 0.04)" },
-            horzLines: { color: "rgba(255, 255, 255, 0.04)" },
-          },
-          rightPriceScale: {
-            borderColor: "rgba(255, 255, 255, 0.08)",
-          },
-          timeScale: {
-            borderColor: "rgba(255, 255, 255, 0.08)",
-          },
-          handleScroll: false,
-          handleScale: false,
-        });
-
-        if (!chart) return;
-        const areaSeries = chart.addSeries(AreaSeries, {
-          lineColor: "#22ab94",
-          topColor: "rgba(34, 171, 148, 0.24)",
-          bottomColor: "rgba(34, 171, 148, 0.03)",
-          lineWidth: 2,
-        });
-
-        const seriesData = filteredData.map((point) => ({
-          time: point.time,
-          value: point.value,
-        }));
-        areaSeries.setData(seriesData);
-        chart.timeScale().fitContent();
-        setChartUnavailable(false);
-
-        resizeObserver = new ResizeObserver(() => {
-          if (!container || !chart) return;
-          chart.applyOptions({ width: container.clientWidth });
-        });
-        resizeObserver.observe(container);
-      } catch (error) {
-        console.error("[PortfolioChart] Failed to initialize lightweight chart, using fallback.", error);
-        setChartUnavailable(true);
-      }
-    };
-
-    frameId = window.requestAnimationFrame(() => {
-      setup();
-    });
-
-    return () => {
-      remove = true;
-      window.cancelAnimationFrame(frameId);
-      if (resizeObserver) resizeObserver.disconnect();
-      if (chart) chart.remove();
-    };
-  }, [filteredData]);
+  const filteredData = useMemo(() => {
+    const rangeDef = RANGES.find((r) => r.id === range)!;
+    if (!rangeDef.days) return points;
+    const last = new Date(points[points.length - 1].time);
+    const cutoff = new Date(last);
+    cutoff.setDate(cutoff.getDate() - rangeDef.days);
+    return points.filter((p) => new Date(p.time) >= cutoff);
+  }, [points, range]);
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-end">
-        <div className="flex items-center rounded-md border border-border overflow-hidden">
-          {(["1W", "1M", "3M", "1Y", "ALL"] as const).map((value) => (
+    <div className="flex flex-col gap-3">
+      {/* Range toggle buttons */}
+      <div className="flex justify-end">
+        <div className="flex gap-1 rounded-full border border-hairline bg-surface-2 p-1" role="tablist" aria-label="Time range">
+          {RANGES.map((r) => (
             <button
-              key={value}
-              onClick={() => setRange(value)}
-              className={`px-2.5 h-7 text-[11px] font-medium transition-colors ${
-                range === value
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+              key={r.id}
+              role="tab"
+              aria-selected={range === r.id}
+              onClick={() => setRange(r.id)}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                range === r.id
+                  ? "bg-accent-teal text-primary-foreground"
+                  : "text-foreground-muted hover:text-foreground"
               }`}
             >
-              {value}
+              {r.label}
             </button>
           ))}
         </div>
       </div>
-      {!chartUnavailable && <div ref={containerRef} className="w-full" style={{ height: 300 }} />}
-      {chartUnavailable && (
-        <div className="h-[300px] w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={filteredData}>
-              <XAxis dataKey="time" hide />
-              <YAxis hide domain={["dataMin - 200", "dataMax + 200"]} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "oklch(0.18 0.03 264)",
-                  border: "1px solid oklch(1 0 0 / 8%)",
-                  borderRadius: "8px",
-                  color: "oklch(0.96 0.005 264)",
-                  fontSize: "12px",
-                }}
+
+      <ChartContainer config={chartConfig} className="h-[240px] w-full">
+        <AreaChart data={filteredData} margin={{ left: 0, right: 0, top: 4, bottom: 0 }}>
+          <defs>
+            <linearGradient id="fillValue" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="var(--accent-teal)" stopOpacity={0.35} />
+              <stop offset="95%" stopColor="var(--accent-teal)" stopOpacity={0.02} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid vertical={false} stroke="var(--hairline)" />
+          <XAxis
+            dataKey="time"
+            tickLine={false}
+            axisLine={false}
+            tickMargin={8}
+            minTickGap={40}
+            tick={{ fill: "var(--foreground-muted)", fontSize: 10 }}
+            tickFormatter={(value: string) =>
+              new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+            }
+          />
+          <YAxis
+            tickLine={false}
+            axisLine={false}
+            tickMargin={8}
+            width={72}
+            tick={{ fill: "var(--foreground-muted)", fontSize: 10 }}
+            tickFormatter={(v: number) => fmt$(v)}
+          />
+          <ChartTooltip
+            cursor={{ stroke: "var(--accent-teal)", strokeOpacity: 0.4, strokeDasharray: "3 3" }}
+            content={
+              <ChartTooltipContent
+                labelFormatter={(value: string) =>
+                  new Date(value).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  })
+                }
+                formatter={(value: unknown) => [fmt$(value as number), ""]}
+                indicator="dot"
               />
-              <Area
-                type="monotone"
-                dataKey="value"
-                stroke="#22ab94"
-                strokeWidth={2}
-                fill="rgba(34, 171, 148, 0.18)"
-                isAnimationActive={false}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      )}
+            }
+          />
+          <Area
+            dataKey="value"
+            type="natural"
+            fill="url(#fillValue)"
+            stroke="var(--accent-teal)"
+            strokeWidth={2}
+            dot={false}
+            activeDot={{ r: 5, fill: "var(--accent-teal)", stroke: "var(--background)", strokeWidth: 2 }}
+          />
+        </AreaChart>
+      </ChartContainer>
     </div>
   );
 }

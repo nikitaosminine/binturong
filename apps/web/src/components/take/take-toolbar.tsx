@@ -26,15 +26,15 @@ export function TakeToolbar({
 }: TakeToolbarProps) {
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap gap-1 rounded-lg bg-muted/40 p-0.5">
+      <div className="flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
         {tabs.map((tab) => (
           <button
             key={tab.value}
             onClick={() => onFilterChange(tab.value)}
-            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+            className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
               selectedFilter === tab.value
-                ? "bg-card text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
+                ? "bg-accent-teal text-primary-foreground"
+                : "text-foreground-muted hover:text-foreground"
             }`}
           >
             {tab.label}

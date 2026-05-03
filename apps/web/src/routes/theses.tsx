@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Plus, Sparkles, X } from "lucide-react";
+import { Plus, ChevronRight, X } from "lucide-react";
 import { useOutletContext } from "react-router-dom";
 import { Thesis } from "@/lib/thesis";
 import { useAuth } from "@/hooks/use-auth";
@@ -9,6 +9,7 @@ import { TakeToolbar, FilterTab } from "@/components/take/take-toolbar";
 import { TakeThesisCard } from "@/components/take/take-thesis-card";
 import { TakeInsightCard } from "@/components/take/take-insight-card";
 import { TakeKpiSummary } from "@/components/take/take-kpi-summary";
+import { PrimaryTabs } from "@/components/primary-tabs";
 import {
   BUCKET_ORDER,
   DateBucket,
@@ -44,6 +45,11 @@ const FEED_FILTERS: ("All" | InsightStatus)[] = [
   "Watch",
   "Neutral",
 ];
+
+type PeriodFilter = "All" | "Last week" | "Last month";
+const PERIOD_FILTERS: PeriodFilter[] = ["All", "Last week", "Last month"];
+
+type SortOrder = "desc" | "asc";
 const API_BASE_URL =
   import.meta.env.VITE_API_URL ??
   "https://binturong-api.nikita-osminine.workers.dev";
@@ -55,7 +61,10 @@ export default function ThesesPage() {
   const [search, setSearch] = useState("");
   const [feedFilter, setFeedFilter] = useState<"All" | InsightStatus>("All");
   const [sourceFilter, setSourceFilter] = useState<"all" | "agent" | "market">("all");
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>("All");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [collapsedBuckets, setCollapsedBuckets] = useState<Set<string>>(new Set());
   const [selectedThesis, setSelectedThesis] = useState<string | null>(null);
   const [selectedInsight, setSelectedInsight] = useState<string | null>(null);
   const [agentInsights, setAgentInsights] = useState<TakeInsight[]>([]);
@@ -127,12 +136,16 @@ export default function ThesesPage() {
       list = list.filter((insight) => insight.thesisId === selectedThesis);
     }
 
-    return list.sort((a, b) => {
-      const thesisA = theses.find((thesis) => thesis.id === a.thesisId);
-      const thesisB = theses.find((thesis) => thesis.id === b.thesisId);
-      return rankScore(b, thesisB) - rankScore(a, thesisA);
-    });
-  }, [dismissed, feedFilter, insights, selectedThesis, sourceFilter, theses]);
+    if (periodFilter === "Last week") {
+      list = list.filter((insight) => insight.hoursAgo <= 168);
+    } else if (periodFilter === "Last month") {
+      list = list.filter((insight) => insight.hoursAgo <= 720);
+    }
+
+    return list.sort((a, b) =>
+      sortOrder === "desc" ? a.hoursAgo - b.hoursAgo : b.hoursAgo - a.hoursAgo,
+    );
+  }, [dismissed, feedFilter, insights, periodFilter, selectedThesis, sortOrder, sourceFilter]);
 
   const groupedInsights = useMemo(() => {
     const map = new Map<DateBucket, typeof visibleInsights>();
@@ -176,17 +189,12 @@ export default function ThesesPage() {
   const feedRef = useRef<HTMLDivElement>(null);
   const bucketRefs = useRef<Map<DateBucket, HTMLDivElement | null>>(new Map());
 
-  const scrollToBucket = (bucket: DateBucket) => {
-    const container = feedRef.current;
-    const target = bucketRefs.current.get(bucket);
-    if (!container || !target) return;
-    const top = target.offsetTop - container.offsetTop;
-    container.scrollTo({ top, behavior: "smooth" });
-  };
-
   return (
-    <div className="w-full space-y-6">
-      <div className="grid grid-cols-1 items-end border-b border-border/50 pb-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+    <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+      <PrimaryTabs />
+      <div className="flex min-h-0 flex-1 flex-col px-6 pt-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
+      <div className="grid shrink-0 grid-cols-1 items-end border-b border-hairline pb-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
         <div className="space-y-4">
           <TakePageHeader />
           <div className="flex justify-end">
@@ -199,8 +207,8 @@ export default function ThesesPage() {
         <div className="hidden xl:block" />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-        <section className="rounded-xl border border-border/50 bg-card p-4">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 pb-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+        <section className="overflow-y-auto rounded-xl border border-border/50 bg-card p-4">
           <TakeKpiSummary
             theses={theses}
             insights={insights}
@@ -236,12 +244,24 @@ export default function ThesesPage() {
           </div>
         </section>
 
-        <section className="rounded-xl border border-border/50 bg-card p-5">
+        <section className="flex min-h-0 flex-col overflow-y-auto rounded-xl border border-border/50 bg-card p-5">
           <div className="mb-4 flex items-start justify-between">
             <div>
               <h2 className="flex items-center gap-2 text-lg font-semibold">
-                <Sparkles className="h-4 w-4 text-primary" />
                 Trace feed
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0" aria-hidden="true">
+                  <defs>
+                    <filter id="bisect-glow" x="-50%" y="-50%" width="200%" height="200%">
+                      <feGaussianBlur stdDeviation="1.4" result="blur"/>
+                      <feMerge>
+                        <feMergeNode in="blur"/>
+                        <feMergeNode in="SourceGraphic"/>
+                      </feMerge>
+                    </filter>
+                  </defs>
+                  <circle cx="9" cy="9" r="5.5" fill="white" fillOpacity="0.92" filter="url(#bisect-glow)"/>
+                  <line x1="9" y1="0" x2="9" y2="18" stroke="var(--background)" strokeWidth="1.2"/>
+                </svg>
               </h2>
               <p className="text-xs text-muted-foreground">
                 Signals mapped to your theses — review and act with context.
@@ -267,105 +287,155 @@ export default function ThesesPage() {
             </div>
           )}
 
-          <div className="mb-3 flex flex-wrap gap-1.5">
-            {FEED_FILTERS.map((status) => (
-              <button
-                key={status}
-                onClick={() => setFeedFilter(status)}
-                className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
-                  feedFilter === status
-                    ? "border-primary/40 bg-primary/15 text-primary"
-                    : "border-border/50 bg-muted/40 text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {status}
-              </button>
-            ))}
-          </div>
-          <div className="mb-3 flex flex-wrap gap-1.5">
-            {(["all", "agent", "market"] as const).map((source) => (
-              <button
-                key={source}
-                onClick={() => setSourceFilter(source)}
-                className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
-                  sourceFilter === source
-                    ? "border-primary/40 bg-primary/15 text-primary"
-                    : "border-border/50 bg-muted/40 text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {source === "all" ? "All sources" : source === "agent" ? "Agent" : "Market"}
-              </button>
-            ))}
-          </div>
-
-          {groupedInsights.length > 1 && (
-            <div className="mb-2 flex flex-wrap items-center gap-1.5">
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                Jump to
-              </span>
-              {groupedInsights.map(([bucket, items]) => (
-                <button
-                  key={bucket}
-                  onClick={() => scrollToBucket(bucket)}
-                  className="rounded-full border border-border/50 bg-muted/40 px-2 py-0.5 text-[10px] text-muted-foreground hover:border-primary/40 hover:text-primary"
-                >
-                  {bucket} <span className="text-muted-foreground">· {items.length}</span>
-                </button>
-              ))}
+          <div className="mb-3 flex flex-wrap items-center gap-3">
+            {/* Sentiment */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-foreground-muted">Sentiment</span>
+              <div className="flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
+                {FEED_FILTERS.map((status) => (
+                  <button
+                    key={status}
+                    onClick={() => setFeedFilter(status)}
+                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                      feedFilter === status
+                        ? "bg-accent-teal text-primary-foreground"
+                        : "text-foreground-muted hover:text-foreground"
+                    }`}
+                  >
+                    {status}
+                  </button>
+                ))}
+              </div>
             </div>
-          )}
 
-          <div
-            ref={feedRef}
-            className="take-scrollbar flex max-h-[calc(100vh-320px)] flex-col gap-3 overflow-y-auto pr-1"
-          >
+            {/* Source */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-foreground-muted">Source</span>
+              <div className="flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
+                {(["all", "agent", "market"] as const).map((source) => (
+                  <button
+                    key={source}
+                    onClick={() => setSourceFilter(source)}
+                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                      sourceFilter === source
+                        ? "bg-accent-teal text-primary-foreground"
+                        : "text-foreground-muted hover:text-foreground"
+                    }`}
+                  >
+                    {source === "all" ? "All" : source === "agent" ? "Agent" : "Market"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Period */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-foreground-muted">Period</span>
+              <div className="flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
+                {PERIOD_FILTERS.map((period) => (
+                  <button
+                    key={period}
+                    onClick={() => setPeriodFilter(period)}
+                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                      periodFilter === period
+                        ? "bg-accent-teal text-primary-foreground"
+                        : "text-foreground-muted hover:text-foreground"
+                    }`}
+                  >
+                    {period}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Sort order */}
+            <div className="ml-auto flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
+              <button
+                onClick={() => setSortOrder("desc")}
+                className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                  sortOrder === "desc"
+                    ? "bg-accent-teal text-primary-foreground"
+                    : "text-foreground-muted hover:text-foreground"
+                }`}
+                title="Newest first"
+              >
+                ↓ Newest
+              </button>
+              <button
+                onClick={() => setSortOrder("asc")}
+                className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                  sortOrder === "asc"
+                    ? "bg-accent-teal text-primary-foreground"
+                    : "text-foreground-muted hover:text-foreground"
+                }`}
+                title="Oldest first"
+              >
+                ↑ Oldest
+              </button>
+            </div>
+          </div>
+
+          <div ref={feedRef} className="take-scrollbar flex flex-col gap-2 pr-1">
             {groupedInsights.length === 0 && (
               <div className="rounded-lg border border-dashed border-border/50 p-8 text-center text-xs text-muted-foreground">
                 No insights match this filter.
               </div>
             )}
 
-            {groupedInsights.map(([bucket, items]) => (
-              <div
-                key={bucket}
-                ref={(el) => {
-                  bucketRefs.current.set(bucket, el);
-                }}
-                className="flex flex-col gap-2"
-              >
-                <button
-                  onClick={() => scrollToBucket(bucket)}
-                  className="sticky top-0 z-10 -mx-1 flex items-center gap-2 bg-card/95 px-1 py-1 text-left backdrop-blur hover:text-primary"
-                  aria-label={`Scroll to ${bucket}`}
+            {groupedInsights.map(([bucket, items]) => {
+              const collapsed = collapsedBuckets.has(bucket);
+              return (
+                <div
+                  key={bucket}
+                  ref={(el) => { bucketRefs.current.set(bucket, el); }}
+                  className="flex flex-col gap-2"
                 >
-                  <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    {bucket}
-                  </h3>
-                  <span className="text-[10px] text-muted-foreground">· {items.length}</span>
-                  <div className="ml-2 h-px flex-1 bg-border/50" />
-                </button>
-
-                {items.map((insight) => (
-                  <TakeInsightCard
-                    key={insight.id}
-                    insight={insight}
-                    thesis={theses.find((thesis) => thesis.id === insight.thesisId)}
-                    selected={selectedInsight === insight.id}
-                    onSelect={() =>
-                      setSelectedInsight((prev) => (prev === insight.id ? null : insight.id))
+                  <button
+                    onClick={() =>
+                      setCollapsedBuckets((prev) => {
+                        const next = new Set(prev);
+                        next.has(bucket) ? next.delete(bucket) : next.add(bucket);
+                        return next;
+                      })
                     }
-                    onDismiss={() => setDismissed((prev) => new Set(prev).add(insight.id))}
-                    onThesisClick={() => {
-                      setSelectedThesis((prev) =>
-                        prev === insight.thesisId ? null : insight.thesisId,
-                      );
-                    }}
-                  />
-                ))}
-              </div>
-            ))}
+                    className="sticky top-0 z-10 -mx-1 flex items-center gap-2 bg-card/95 px-1 py-1 text-left backdrop-blur hover:text-primary"
+                    aria-expanded={!collapsed}
+                    aria-label={`${collapsed ? "Expand" : "Collapse"} ${bucket}`}
+                  >
+                    <ChevronRight
+                      className={`h-3 w-3 shrink-0 text-muted-foreground transition-transform ${collapsed ? "" : "rotate-90"}`}
+                    />
+                    <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      {bucket}
+                    </h3>
+                    <span className="text-[10px] text-muted-foreground">· {items.length}</span>
+                    <div className="ml-2 h-px flex-1 bg-border/50" />
+                  </button>
+
+                  {!collapsed && items.map((insight) => (
+                    <TakeInsightCard
+                      key={insight.id}
+                      insight={insight}
+                      thesis={theses.find((thesis) => thesis.id === insight.thesisId)}
+                      selected={selectedInsight === insight.id}
+                      onSelect={() =>
+                        setSelectedInsight((prev) => (prev === insight.id ? null : insight.id))
+                      }
+                      onDismiss={() => setDismissed((prev) => new Set(prev).add(insight.id))}
+                      onThesisClick={() => {
+                        setSelectedThesis((prev) =>
+                          prev === insight.thesisId ? null : insight.thesisId,
+                        );
+                      }}
+                    />
+                  ))}
+                </div>
+              );
+            })}
           </div>
         </section>
+      </div>
+    </div>
       </div>
     </div>
   );

@@ -1,246 +1,145 @@
-import { useEffect, useRef, useState } from "react";
-import { BarChart3, Bell, BookOpen, LogOut, PanelsTopLeft, Settings } from "lucide-react";
+import { useState, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  useSidebar,
-} from "@/components/ui/sidebar";
+import { BarChart3, ChevronLeft, LogOut, Settings } from "lucide-react";
+import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/hooks/use-auth";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 
-interface AppSidebarProps {
-  activeThesisCount?: number;
-}
+type NavItem = {
+  to: string;
+  label: string;
+  icon: ReactNode;
+};
 
-export function AppSidebar({ activeThesisCount = 0 }: AppSidebarProps) {
-  const { state, setOpen, isMobile } = useSidebar();
-  const collapsed = state === "collapsed";
-  const collapseTimerRef = useRef<number | null>(null);
-  const [sidebarControlOpen, setSidebarControlOpen] = useState(false);
-  const [sidebarMode, setSidebarMode] = useState<"expanded" | "collapsed" | "hover">(() => {
-    try {
-      const saved = localStorage.getItem("binturong.sidebar.mode");
-      if (saved === "expanded" || saved === "collapsed" || saved === "hover") return saved;
-    } catch {
-      // ignore
-    }
-    return "expanded";
-  });
-  const location = useLocation();
+type NavGroup = {
+  label: string | null;
+  items: NavItem[];
+};
+
+const GROUPS: NavGroup[] = [
+  {
+    label: null,
+    items: [
+      { to: "/portfolios", label: "Portfolio", icon: <BarChart3 className="h-4 w-4" /> },
+    ],
+  },
+  {
+    label: "Settings",
+    items: [
+      { to: "/settings", label: "Settings", icon: <Settings className="h-4 w-4" /> },
+    ],
+  },
+];
+
+export function AppSidebar({ children }: { children: ReactNode }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const { pathname } = useLocation();
   const navigate = useNavigate();
-  const { user } = useAuth();
-  const isPortfolios = location.pathname.startsWith("/portfolios");
-  const isTheTake = location.pathname.startsWith("/the-take");
 
-  const displayName = user?.user_metadata?.full_name
-    || user?.email?.split("@")[0]
-    || "User";
-  const email = user?.email || "";
-  const initials = displayName.slice(0, 2).toUpperCase();
+  const isActive = (to: string) =>
+    to === "/portfolios"
+      ? pathname.startsWith("/portfolios") || pathname.startsWith("/the-take")
+      : pathname.startsWith(to);
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     navigate("/login");
   };
 
-  useEffect(() => {
-    try {
-      localStorage.setItem("binturong.sidebar.mode", sidebarMode);
-    } catch {
-      // ignore
-    }
-
-    if (sidebarMode === "expanded") setOpen(true);
-    else setOpen(false);
-    // setOpen changes identity when open state changes; we only want to react to mode changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sidebarMode]);
-
-  useEffect(() => {
-    return () => {
-      if (collapseTimerRef.current != null) {
-        window.clearTimeout(collapseTimerRef.current);
-      }
-    };
-  }, []);
-
-  const handleHoverEnter = () => {
-    if (isMobile || sidebarMode !== "hover") return;
-    if (collapseTimerRef.current != null) {
-      window.clearTimeout(collapseTimerRef.current);
-      collapseTimerRef.current = null;
-    }
-    setOpen(true);
-  };
-
-  const handleHoverLeave = () => {
-    if (isMobile || sidebarMode !== "hover") return;
-    if (sidebarControlOpen) return;
-    if (collapseTimerRef.current != null) {
-      window.clearTimeout(collapseTimerRef.current);
-    }
-    collapseTimerRef.current = window.setTimeout(() => {
-      setOpen(false);
-      collapseTimerRef.current = null;
-    }, 120);
-  };
-
-  useEffect(() => {
-    if (isMobile || sidebarMode !== "hover") return;
-    if (sidebarControlOpen) {
-      if (collapseTimerRef.current != null) {
-        window.clearTimeout(collapseTimerRef.current);
-        collapseTimerRef.current = null;
-      }
-      setOpen(true);
-    }
-  }, [sidebarControlOpen, sidebarMode, isMobile, setOpen]);
-
   return (
-    <Sidebar
-      collapsible="icon"
-      onMouseEnter={handleHoverEnter}
-      onMouseLeave={handleHoverLeave}
-    >
-      <SidebarHeader className="p-0 border-b border-border">
-        <div className="flex items-center gap-2.5 px-4 h-14">
-          <div className="h-7 w-7 rounded-md bg-primary/20 border border-primary/30 flex items-center justify-center text-primary shrink-0">
-            <BarChart3 className="h-3.5 w-3.5" />
-          </div>
-          {!collapsed && (
-            <div className="flex flex-col leading-tight">
-              <span className="text-sm font-semibold tracking-tight">Binturong</span>
-              <span className="text-[10px] text-muted-foreground">Portfolio OS</span>
+    <div className="flex min-h-screen w-full bg-background text-foreground">
+      <aside
+        className={`sticky top-0 flex h-screen shrink-0 flex-col border-r border-hairline bg-surface transition-all duration-200 ${
+          collapsed ? "w-[68px]" : "w-[232px]"
+        }`}
+      >
+        {/* Logo */}
+        <div className="flex h-14 items-center justify-between border-b border-hairline px-3">
+          <Link to="/portfolios" className="flex items-center gap-2 overflow-hidden">
+            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent-teal/15 text-accent-teal">
+              <BarChart3 className="h-4 w-4" />
             </div>
-          )}
+            {!collapsed && (
+              <span className="truncate text-sm font-semibold tracking-tight">Binturong</span>
+            )}
+          </Link>
+          <button
+            type="button"
+            onClick={() => setCollapsed((c) => !c)}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-foreground-muted transition-colors hover:bg-surface-2 hover:text-foreground"
+            style={{ marginLeft: collapsed ? "-4px" : "0" }}
+          >
+            <ChevronLeft
+              className={`h-4 w-4 transition-transform ${collapsed ? "rotate-180" : ""}`}
+            />
+          </button>
         </div>
-      </SidebarHeader>
 
-      <SidebarContent>
-        <SidebarGroup>
-          {!collapsed && <SidebarGroupLabel className="text-[10px] uppercase tracking-widest px-2 py-2">Workspace</SidebarGroupLabel>}
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive={isPortfolios} tooltip="Portfolios">
-                  <Link to="/portfolios">
-                    <BarChart3 className="h-4 w-4" />
-                    {!collapsed && <span>Portfolios</span>}
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
+        {/* Nav */}
+        <nav className="flex-1 overflow-y-auto px-2 py-3">
+          {GROUPS.map((group, gi) => {
+            const showSeparator = collapsed && gi > 0;
+            return (
+              <div key={gi} className="mb-2">
+                {showSeparator && <div className="mx-2 my-2 border-t border-hairline" />}
+                {!collapsed && group.label && (
+                  <div className="px-2.5 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground-muted">
+                    {group.label}
+                  </div>
+                )}
+                <ul className="flex flex-col gap-0.5">
+                  {group.items.map((item) => {
+                    const active = isActive(item.to);
+                    return (
+                      <li key={item.to}>
+                        <Link
+                          to={item.to}
+                          title={collapsed ? item.label : undefined}
+                          className={`flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${
+                            active
+                              ? "bg-accent-teal/12 text-foreground"
+                              : "text-foreground-muted hover:bg-surface-2 hover:text-foreground"
+                          } ${collapsed ? "justify-center" : ""}`}
+                        >
+                          <span
+                            className={`grid h-5 w-5 shrink-0 place-items-center ${
+                              active ? "text-accent-teal" : ""
+                            }`}
+                          >
+                            {item.icon}
+                          </span>
+                          {!collapsed && <span className="truncate">{item.label}</span>}
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            );
+          })}
+        </nav>
 
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive={isTheTake} tooltip="The Take">
-                  <Link to="/the-take" className="flex items-center justify-between w-full">
-                    <span className="flex items-center gap-2">
-                      <BookOpen className="h-4 w-4" />
-                      {!collapsed && <span>The Take</span>}
-                    </span>
-                    {!collapsed && activeThesisCount > 0 && (
-                      <span className="ml-auto inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-full bg-primary/20 text-primary text-[10px] font-medium">
-                        {activeThesisCount}
-                      </span>
-                    )}
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild tooltip="Risk watch">
-                  <Link to="/risk-watch" className="flex items-center justify-between w-full">
-                    <span className="flex items-center gap-2">
-                      <Bell className="h-4 w-4" />
-                      {!collapsed && <span>Risk watch</span>}
-                    </span>
-                    {!collapsed && (
-                      <span className="ml-auto inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-full bg-amber-500/20 text-amber-400 text-[10px] font-medium">
-                        4
-                      </span>
-                    )}
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild tooltip="Settings">
-                  <Link to="/settings">
-                    <Settings className="h-4 w-4" />
-                    {!collapsed && <span>Settings</span>}
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-      </SidebarContent>
-
-      <SidebarFooter className="p-3 border-t border-border">
-        <DropdownMenu open={sidebarControlOpen} onOpenChange={setSidebarControlOpen}>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size={collapsed ? "icon" : "sm"} className="w-full justify-start mb-1">
-              <PanelsTopLeft className="h-4 w-4" />
-              {!collapsed && <span className="ml-2">Sidebar control</span>}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent side="top" align="start" className="w-52">
-            <DropdownMenuLabel>Sidebar control</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => setSidebarMode("expanded")}>
-              <span className="mr-2 w-4 text-center">{sidebarMode === "expanded" ? "●" : ""}</span>
-              Expanded
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setSidebarMode("collapsed")}>
-              <span className="mr-2 w-4 text-center">{sidebarMode === "collapsed" ? "●" : ""}</span>
-              Collapsed
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setSidebarMode("hover")}>
-              <span className="mr-2 w-4 text-center">{sidebarMode === "hover" ? "●" : ""}</span>
-              Expand on hover
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <Button
-          variant="ghost"
-          size={collapsed ? "icon" : "sm"}
-          className="w-full justify-start text-muted-foreground hover:text-foreground mb-1"
-          onClick={handleSignOut}
+        {/* Footer */}
+        <div
+          className={`flex flex-col gap-1 border-t border-hairline p-2 ${collapsed ? "items-center" : ""}`}
         >
-          <LogOut className="h-4 w-4" />
-          {!collapsed && <span className="ml-2">Sign out</span>}
-        </Button>
+          {!collapsed && <ThemeSwitcher />}
+          <button
+            type="button"
+            onClick={handleSignOut}
+            className={`flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium text-foreground-muted transition-colors hover:bg-surface-2 hover:text-foreground ${
+              collapsed ? "justify-center" : ""
+            }`}
+            title={collapsed ? "Sign out" : undefined}
+          >
+            <LogOut className="h-4 w-4 shrink-0" />
+            {!collapsed && <span>Sign out</span>}
+          </button>
+        </div>
+      </aside>
 
-        {!collapsed && email && (
-          <div className="flex items-center gap-2 rounded-md bg-[oklch(1_0_0/3%)] border border-border px-2 py-1.5">
-            <div className="h-6 w-6 rounded-full bg-gradient-to-br from-[oklch(0.7_0.18_250)] to-[oklch(0.6_0.2_320)] flex items-center justify-center shrink-0">
-              <span className="text-[9px] font-semibold text-white">{initials}</span>
-            </div>
-            <div className="min-w-0">
-              <div className="text-[11px] font-medium truncate">{displayName}</div>
-              <div className="text-[10px] text-muted-foreground truncate">{email}</div>
-            </div>
-          </div>
-        )}
-      </SidebarFooter>
-    </Sidebar>
+      {/* Main */}
+      <main className="min-w-0 flex-1">{children}</main>
+    </div>
   );
 }
