@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Plus, X } from "lucide-react";
+import { Plus, ChevronRight, X } from "lucide-react";
 import { useOutletContext } from "react-router-dom";
 import { Thesis } from "@/lib/thesis";
 import { useAuth } from "@/hooks/use-auth";
@@ -64,6 +64,7 @@ export default function ThesesPage() {
   const [periodFilter, setPeriodFilter] = useState<PeriodFilter>("All");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [collapsedBuckets, setCollapsedBuckets] = useState<Set<string>>(new Set());
   const [selectedThesis, setSelectedThesis] = useState<string | null>(null);
   const [selectedInsight, setSelectedInsight] = useState<string | null>(null);
   const [agentInsights, setAgentInsights] = useState<TakeInsight[]>([]);
@@ -188,20 +189,12 @@ export default function ThesesPage() {
   const feedRef = useRef<HTMLDivElement>(null);
   const bucketRefs = useRef<Map<DateBucket, HTMLDivElement | null>>(new Map());
 
-  const scrollToBucket = (bucket: DateBucket) => {
-    const container = feedRef.current;
-    const target = bucketRefs.current.get(bucket);
-    if (!container || !target) return;
-    const top = target.offsetTop - container.offsetTop;
-    container.scrollTo({ top, behavior: "smooth" });
-  };
-
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
       <PrimaryTabs />
-      <div className="px-6 pb-8 pt-4">
-    <div className="w-full space-y-6">
-      <div className="grid grid-cols-1 items-end border-b border-hairline pb-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+      <div className="flex min-h-0 flex-1 flex-col px-6 pt-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
+      <div className="grid shrink-0 grid-cols-1 items-end border-b border-hairline pb-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
         <div className="space-y-4">
           <TakePageHeader />
           <div className="flex justify-end">
@@ -214,8 +207,8 @@ export default function ThesesPage() {
         <div className="hidden xl:block" />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-        <section className="rounded-xl border border-border/50 bg-card p-4">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 pb-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+        <section className="overflow-y-auto rounded-xl border border-border/50 bg-card p-4">
           <TakeKpiSummary
             theses={theses}
             insights={insights}
@@ -251,7 +244,7 @@ export default function ThesesPage() {
           </div>
         </section>
 
-        <section className="rounded-xl border border-border/50 bg-card p-5">
+        <section className="flex min-h-0 flex-col overflow-y-auto rounded-xl border border-border/50 bg-card p-5">
           <div className="mb-4 flex items-start justify-between">
             <div>
               <h2 className="flex items-center gap-2 text-lg font-semibold">
@@ -382,72 +375,63 @@ export default function ThesesPage() {
             </div>
           </div>
 
-          {groupedInsights.length > 1 && (
-            <div className="mb-2 flex flex-wrap items-center gap-1.5">
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                Jump to
-              </span>
-              {groupedInsights.map(([bucket, items]) => (
-                <button
-                  key={bucket}
-                  onClick={() => scrollToBucket(bucket)}
-                  className="rounded-full border border-border/50 bg-muted/40 px-2 py-0.5 text-[10px] text-muted-foreground hover:border-primary/40 hover:text-primary"
-                >
-                  {bucket} <span className="text-muted-foreground">· {items.length}</span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div
-            ref={feedRef}
-            className="take-scrollbar flex flex-col gap-3 pr-1"
-          >
+          <div ref={feedRef} className="take-scrollbar flex flex-col gap-2 pr-1">
             {groupedInsights.length === 0 && (
               <div className="rounded-lg border border-dashed border-border/50 p-8 text-center text-xs text-muted-foreground">
                 No insights match this filter.
               </div>
             )}
 
-            {groupedInsights.map(([bucket, items]) => (
-              <div
-                key={bucket}
-                ref={(el) => {
-                  bucketRefs.current.set(bucket, el);
-                }}
-                className="flex flex-col gap-2"
-              >
-                <button
-                  onClick={() => scrollToBucket(bucket)}
-                  className="sticky top-0 z-10 -mx-1 flex items-center gap-2 bg-card/95 px-1 py-1 text-left backdrop-blur hover:text-primary"
-                  aria-label={`Scroll to ${bucket}`}
+            {groupedInsights.map(([bucket, items]) => {
+              const collapsed = collapsedBuckets.has(bucket);
+              return (
+                <div
+                  key={bucket}
+                  ref={(el) => { bucketRefs.current.set(bucket, el); }}
+                  className="flex flex-col gap-2"
                 >
-                  <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    {bucket}
-                  </h3>
-                  <span className="text-[10px] text-muted-foreground">· {items.length}</span>
-                  <div className="ml-2 h-px flex-1 bg-border/50" />
-                </button>
-
-                {items.map((insight) => (
-                  <TakeInsightCard
-                    key={insight.id}
-                    insight={insight}
-                    thesis={theses.find((thesis) => thesis.id === insight.thesisId)}
-                    selected={selectedInsight === insight.id}
-                    onSelect={() =>
-                      setSelectedInsight((prev) => (prev === insight.id ? null : insight.id))
+                  <button
+                    onClick={() =>
+                      setCollapsedBuckets((prev) => {
+                        const next = new Set(prev);
+                        next.has(bucket) ? next.delete(bucket) : next.add(bucket);
+                        return next;
+                      })
                     }
-                    onDismiss={() => setDismissed((prev) => new Set(prev).add(insight.id))}
-                    onThesisClick={() => {
-                      setSelectedThesis((prev) =>
-                        prev === insight.thesisId ? null : insight.thesisId,
-                      );
-                    }}
-                  />
-                ))}
-              </div>
-            ))}
+                    className="sticky top-0 z-10 -mx-1 flex items-center gap-2 bg-card/95 px-1 py-1 text-left backdrop-blur hover:text-primary"
+                    aria-expanded={!collapsed}
+                    aria-label={`${collapsed ? "Expand" : "Collapse"} ${bucket}`}
+                  >
+                    <ChevronRight
+                      className={`h-3 w-3 shrink-0 text-muted-foreground transition-transform ${collapsed ? "" : "rotate-90"}`}
+                    />
+                    <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      {bucket}
+                    </h3>
+                    <span className="text-[10px] text-muted-foreground">· {items.length}</span>
+                    <div className="ml-2 h-px flex-1 bg-border/50" />
+                  </button>
+
+                  {!collapsed && items.map((insight) => (
+                    <TakeInsightCard
+                      key={insight.id}
+                      insight={insight}
+                      thesis={theses.find((thesis) => thesis.id === insight.thesisId)}
+                      selected={selectedInsight === insight.id}
+                      onSelect={() =>
+                        setSelectedInsight((prev) => (prev === insight.id ? null : insight.id))
+                      }
+                      onDismiss={() => setDismissed((prev) => new Set(prev).add(insight.id))}
+                      onThesisClick={() => {
+                        setSelectedThesis((prev) =>
+                          prev === insight.thesisId ? null : insight.thesisId,
+                        );
+                      }}
+                    />
+                  ))}
+                </div>
+              );
+            })}
           </div>
         </section>
       </div>
