@@ -1,6 +1,16 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { Link, useParams, useOutletContext } from "react-router-dom";
-import { ArrowLeft, ArrowDown, ArrowUp, Check, Copy, Minus, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowDown,
+  ArrowUp,
+  Check,
+  Copy,
+  Minus,
+  Pencil,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { getSector } from "@/lib/mock-data";
@@ -9,8 +19,10 @@ import { TakeBadge } from "@/components/take-badge";
 import { Thesis, thesesForTicker } from "@/lib/thesis";
 import { EditHoldingModal } from "@/components/edit-holding-modal";
 import { AddHoldingModal } from "@/components/add-holding-modal";
+import { ImportTransactionsModal } from "@/components/import-transactions-modal";
 import { PortfolioChart } from "@/components/portfolio-chart";
 import { PrimaryTabs } from "@/components/primary-tabs";
+import { TransactionHistoryTab } from "@/components/transaction-history-tab";
 import { AllocationTreemap } from "@/components/portfolio/AllocationTreemap";
 import { AllocationStackedBar } from "@/components/portfolio/AllocationStackedBar";
 import {
@@ -29,12 +41,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface Holding {
   id: string;
@@ -59,7 +67,11 @@ interface ThesisContext {
 }
 
 function fmt$(n: number) {
-  return n.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 });
+  return n.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+  });
 }
 function fmtPct(n: number) {
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
@@ -173,8 +185,7 @@ function saveLS(key: string, val: unknown) {
 
 function PerfCell({ value, money }: { value: number; money?: boolean }) {
   const Icon = value > 0 ? ArrowUp : value < 0 ? ArrowDown : Minus;
-  const tone =
-    value > 0 ? "text-positive" : value < 0 ? "text-negative" : "text-foreground-muted";
+  const tone = value > 0 ? "text-positive" : value < 0 ? "text-negative" : "text-foreground-muted";
   const text = money
     ? `${value > 0 ? "+" : value < 0 ? "−" : ""}${fmt$(Math.abs(value))}`
     : fmtPct(value);
@@ -221,8 +232,10 @@ export default function PortfolioDetailPage() {
   const [cashAction, setCashAction] = useState<"deposit" | "withdraw">("deposit");
   const [cashAmount, setCashAmount] = useState("");
   const [cashSubmitting, setCashSubmitting] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<"holdings" | "transactions">("holdings");
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const [pRes, hRes] = await Promise.all([
       supabase
         .from("portfolios")
@@ -235,11 +248,11 @@ export default function PortfolioDetailPage() {
     else setPortfolio(pRes.data);
     if (!hRes.error) setHoldings(hRes.data || []);
     setLoading(false);
-  };
+  }, [portfolioId]);
 
   useEffect(() => {
     load();
-  }, [portfolioId]);
+  }, [load]);
 
   useEffect(() => {
     if (portfolioId) localStorage.setItem("binturong.last-portfolio-id", portfolioId);
@@ -590,7 +603,7 @@ export default function PortfolioDetailPage() {
               <div className="mb-3 text-[11px] uppercase tracking-widest text-foreground-muted">
                 Portfolio value
               </div>
-              <PortfolioChart />
+              <PortfolioChart portfolioId={portfolioId} />
             </div>
           </div>
 
@@ -616,242 +629,274 @@ export default function PortfolioDetailPage() {
         {/* 1px divider above holdings table */}
         <div className="border-t border-hairline" />
 
-        {/* Holdings table */}
-        <div className="rounded-2xl border border-hairline bg-surface">
-          <div className="flex items-center justify-between border-b border-hairline px-5 py-4">
-            <div className="text-[11px] uppercase tracking-[0.12em] text-foreground-muted">
-              Holdings
-            </div>
-            <div className="text-[11px] tabular-nums text-foreground-muted">
-              {rows.length} positions
-            </div>
-          </div>
+        {/* Holdings and transaction history */}
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)}>
+          <div className="rounded-2xl border border-hairline bg-surface">
+            <div className="flex items-center justify-between border-b border-hairline px-5 py-3">
+              <TabsList className="h-7 rounded-md border border-hairline bg-surface-2 p-0.5">
+                <TabsTrigger
+                  value="holdings"
+                  className="h-6 rounded px-3 text-[11px] uppercase tracking-[0.1em] data-[state=active]:bg-surface data-[state=active]:text-foreground data-[state=inactive]:text-foreground-muted"
+                >
+                  Holdings
+                  <span className="ml-1.5 tabular-nums text-foreground-muted">{rows.length}</span>
+                </TabsTrigger>
+                <TabsTrigger
+                  value="transactions"
+                  className="h-6 rounded px-3 text-[11px] uppercase tracking-[0.1em] data-[state=active]:bg-surface data-[state=active]:text-foreground data-[state=inactive]:text-foreground-muted"
+                >
+                  Transactions
+                </TabsTrigger>
+              </TabsList>
 
-          <div className="overflow-x-auto">
-            <table className="w-full table-auto text-sm">
-              <colgroup>
-                {visibleCols.map((key) => {
-                  const w: Record<string, string> = {
-                    name: "340px",
-                    assetType: "96px",
-                    qty: "64px",
-                    cur: "104px",
-                    buy: "104px",
-                    total: "104px",
-                    gl: "112px",
-                    weight: "78px",
-                    sector: "110px",
-                    perf1D: "76px",
-                    perfYTD: "76px",
-                    take: "52px",
-                  };
-                  return <col key={key} style={{ width: w[key] ?? "auto" }} />;
-                })}
-                <col style={{ width: "52px" }} />
-              </colgroup>
-              <thead>
-                <tr className="text-[10px] uppercase tracking-[0.1em] text-foreground-muted">
-                  {visibleCols.map((key) => {
-                    const col = ALL_COLUMNS.find((c) => c.key === key)!;
-                    const active = sortBy === key;
-                    const isAllocationStart = key === "total";
-                    const isPerformanceStart = key === "gl";
-                    const isTake = key === "take";
-                    return (
-                      <ContextMenu key={key}>
-                        <ContextMenuTrigger asChild>
-                          <th
-                            draggable
-                            onDragStart={() => handleDragStart(key)}
-                            onDragOver={(e) => e.preventDefault()}
-                            onDrop={() => handleDrop(key)}
-                            onClick={() => handleSort(key)}
-                            className={`cursor-pointer select-none whitespace-nowrap px-3 py-3 font-medium transition-colors ${
-                              col.align === "right"
-                                ? "text-right"
-                                : col.align === "center"
-                                  ? "text-center"
-                                  : "text-left"
-                            } ${active ? "text-foreground" : ""} ${
-                              isAllocationStart || isPerformanceStart || isTake
-                                ? "border-l border-hairline/60"
-                                : ""
-                            } ${key === "name" ? "px-5" : ""}`}
-                          >
-                            {col.label}
-                            {active && (
-                              <span className="ml-1 text-[9px]">
-                                {sortDir === "asc" ? "↑" : "↓"}
-                              </span>
-                            )}
-                          </th>
-                        </ContextMenuTrigger>
-                        <ContextMenuContent className="w-48">
-                          {ALL_COLUMNS.map((c) => (
-                            <ContextMenuCheckboxItem
-                              key={c.key}
-                              checked={!hiddenCols.has(c.key)}
-                              onCheckedChange={() => toggleHide(c.key)}
-                            >
-                              {c.label}
-                            </ContextMenuCheckboxItem>
-                          ))}
-                        </ContextMenuContent>
-                      </ContextMenu>
-                    );
-                  })}
-                  <th className="px-2 py-3" />
-                </tr>
-              </thead>
-              <tbody>
-                {rows.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={visibleCols.length + 1}
-                      className="py-10 text-center text-sm text-foreground-muted"
-                    >
-                      No holdings — add one to get started
-                    </td>
-                  </tr>
-                ) : (
-                  rows.map((r) => {
-                    const raw = holdings.find((h) => h.id === r.id)!;
-                    const tickerTheses = thesesForTicker(theses, r.ticker);
-                    return (
-                      <tr
-                        key={r.id}
-                        className="border-t border-hairline/60 transition-colors hover:bg-surface-2/60 group"
-                      >
-                        {visibleCols.map((key) => {
-                          const col = ALL_COLUMNS.find((c) => c.key === key)!;
-                          const alignCls =
-                            col.align === "right"
-                              ? "text-right"
-                              : col.align === "center"
-                                ? "text-center"
-                                : "";
-                          const isAllocationStart = key === "total";
-                          const isPerformanceStart = key === "gl";
-                          const isTake = key === "take";
-                          return (
-                            <td
-                              key={key}
-                              className={`px-3 py-3 text-[12px] ${alignCls} ${
-                                isAllocationStart || isPerformanceStart || isTake
-                                  ? "border-l border-hairline/60"
-                                  : ""
-                              } ${key === "name" ? "px-5" : ""}`}
-                            >
-                              {key === "name" && (
-                                <div className="flex items-center gap-3">
-                                  <TooltipProvider>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <Button
-                                          variant="ghost"
-                                          size="icon"
-                                          className={`h-8 w-8 rounded-md border border-hairline bg-surface-2 transition-colors ${
-                                            copiedId === r.id
-                                              ? "border-accent-teal/40 text-accent-teal"
-                                              : "text-foreground-muted"
-                                          }`}
-                                          onClick={() => copyIsin(r.id, r.isin)}
-                                          aria-label="Copy ISIN"
-                                        >
-                                          {copiedId === r.id ? (
-                                            <Check className="h-3.5 w-3.5" />
-                                          ) : (
-                                            <Copy className="h-3.5 w-3.5" />
-                                          )}
-                                        </Button>
-                                      </TooltipTrigger>
-                                      <TooltipContent>
-                                        <p>{copiedId === r.id ? "Copied!" : r.isin ? "Copy ISIN" : "No ISIN"}</p>
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </TooltipProvider>
-                                  <div className="min-w-0">
-                                    <div className="truncate font-medium text-foreground">
-                                      {r.name}
-                                    </div>
-                                    <div className="text-[10px] tabular-nums text-foreground-muted">
-                                      {r.ticker}
-                                      {r.isin ? ` · ${r.isin}` : ""}
-                                    </div>
-                                  </div>
-                                </div>
-                              )}
-                              {key === "qty" && (
-                                <span className="tabular-nums">{r.qty}</span>
-                              )}
-                              {key === "assetType" && (
-                                <span className="text-foreground-muted">{r.assetType}</span>
-                              )}
-                              {key === "cur" && (
-                                <span className="tabular-nums">{fmt$(r.cur)}</span>
-                              )}
-                              {key === "buy" && (
-                                <span className="tabular-nums text-foreground-muted">
-                                  {fmt$(r.buy)}
-                                </span>
-                              )}
-                              {key === "total" && (
-                                <span className="tabular-nums font-medium">{fmt$(r.total)}</span>
-                              )}
-                              {key === "gl" && <PerfCell value={r.gl} money />}
-                              {key === "weight" && (
-                                <span className="tabular-nums text-foreground-muted">
-                                  {r.weight.toFixed(1)}%
-                                </span>
-                              )}
-                              {key === "sector" && (
-                                <span className="text-foreground-muted">{r.sector}</span>
-                              )}
-                              {key === "perf1D" && <PerfCell value={r.perf1D} />}
-                              {key === "perfYTD" && <PerfCell value={r.perfYTD} />}
-                              {key === "take" && (
-                                <div className="flex justify-center">
-                                  <TakeBadge
-                                    theses={tickerTheses}
-                                    onOpen={openDrawer}
-                                    onCreate={() =>
-                                      openModal(undefined, { tickers: [r.ticker] })
-                                    }
-                                  />
-                                </div>
-                              )}
-                            </td>
-                          );
-                        })}
-                        {/* Row actions */}
-                        <td className="px-2 py-3">
-                          <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6"
-                              onClick={() => setEditingHolding(raw)}
-                            >
-                              <Pencil className="h-3 w-3" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 text-destructive hover:text-destructive"
-                              onClick={() => handleDelete(raw)}
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          </div>
+              <button
+                type="button"
+                onClick={() => setImportOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-full border border-hairline bg-surface px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-surface-2"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Import transactions
+              </button>
+            </div>
+
+            <TabsContent value="holdings" className="m-0">
+              <div className="overflow-x-auto">
+                <table className="w-full table-auto text-sm">
+                  <colgroup>
+                    {visibleCols.map((key) => {
+                      const w: Record<string, string> = {
+                        name: "340px",
+                        assetType: "96px",
+                        qty: "64px",
+                        cur: "104px",
+                        buy: "104px",
+                        total: "104px",
+                        gl: "112px",
+                        weight: "78px",
+                        sector: "110px",
+                        perf1D: "76px",
+                        perfYTD: "76px",
+                        take: "52px",
+                      };
+                      return <col key={key} style={{ width: w[key] ?? "auto" }} />;
+                    })}
+                    <col style={{ width: "52px" }} />
+                  </colgroup>
+                  <thead>
+                    <tr className="text-[10px] uppercase tracking-[0.1em] text-foreground-muted">
+                      {visibleCols.map((key) => {
+                        const col = ALL_COLUMNS.find((c) => c.key === key)!;
+                        const active = sortBy === key;
+                        const isAllocationStart = key === "total";
+                        const isPerformanceStart = key === "gl";
+                        const isTake = key === "take";
+                        return (
+                          <ContextMenu key={key}>
+                            <ContextMenuTrigger asChild>
+                              <th
+                                draggable
+                                onDragStart={() => handleDragStart(key)}
+                                onDragOver={(e) => e.preventDefault()}
+                                onDrop={() => handleDrop(key)}
+                                onClick={() => handleSort(key)}
+                                className={`cursor-pointer select-none whitespace-nowrap px-3 py-3 font-medium transition-colors ${
+                                  col.align === "right"
+                                    ? "text-right"
+                                    : col.align === "center"
+                                      ? "text-center"
+                                      : "text-left"
+                                } ${active ? "text-foreground" : ""} ${
+                                  isAllocationStart || isPerformanceStart || isTake
+                                    ? "border-l border-hairline/60"
+                                    : ""
+                                } ${key === "name" ? "px-5" : ""}`}
+                              >
+                                {col.label}
+                                {active && (
+                                  <span className="ml-1 text-[9px]">
+                                    {sortDir === "asc" ? "↑" : "↓"}
+                                  </span>
+                                )}
+                              </th>
+                            </ContextMenuTrigger>
+                            <ContextMenuContent className="w-48">
+                              {ALL_COLUMNS.map((c) => (
+                                <ContextMenuCheckboxItem
+                                  key={c.key}
+                                  checked={!hiddenCols.has(c.key)}
+                                  onCheckedChange={() => toggleHide(c.key)}
+                                >
+                                  {c.label}
+                                </ContextMenuCheckboxItem>
+                              ))}
+                            </ContextMenuContent>
+                          </ContextMenu>
+                        );
+                      })}
+                      <th className="px-2 py-3" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={visibleCols.length + 1}
+                          className="py-10 text-center text-sm text-foreground-muted"
+                        >
+                          No holdings — add one to get started
                         </td>
                       </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+                    ) : (
+                      rows.map((r) => {
+                        const raw = holdings.find((h) => h.id === r.id)!;
+                        const tickerTheses = thesesForTicker(theses, r.ticker);
+                        return (
+                          <tr
+                            key={r.id}
+                            className="border-t border-hairline/60 transition-colors hover:bg-surface-2/60 group"
+                          >
+                            {visibleCols.map((key) => {
+                              const col = ALL_COLUMNS.find((c) => c.key === key)!;
+                              const alignCls =
+                                col.align === "right"
+                                  ? "text-right"
+                                  : col.align === "center"
+                                    ? "text-center"
+                                    : "";
+                              const isAllocationStart = key === "total";
+                              const isPerformanceStart = key === "gl";
+                              const isTake = key === "take";
+                              return (
+                                <td
+                                  key={key}
+                                  className={`px-3 py-3 text-[12px] ${alignCls} ${
+                                    isAllocationStart || isPerformanceStart || isTake
+                                      ? "border-l border-hairline/60"
+                                      : ""
+                                  } ${key === "name" ? "px-5" : ""}`}
+                                >
+                                  {key === "name" && (
+                                    <div className="flex items-center gap-3">
+                                      <TooltipProvider>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <Button
+                                              variant="ghost"
+                                              size="icon"
+                                              className={`h-8 w-8 rounded-md border border-hairline bg-surface-2 transition-colors ${
+                                                copiedId === r.id
+                                                  ? "border-accent-teal/40 text-accent-teal"
+                                                  : "text-foreground-muted"
+                                              }`}
+                                              onClick={() => copyIsin(r.id, r.isin)}
+                                              aria-label="Copy ISIN"
+                                            >
+                                              {copiedId === r.id ? (
+                                                <Check className="h-3.5 w-3.5" />
+                                              ) : (
+                                                <Copy className="h-3.5 w-3.5" />
+                                              )}
+                                            </Button>
+                                          </TooltipTrigger>
+                                          <TooltipContent>
+                                            <p>
+                                              {copiedId === r.id
+                                                ? "Copied!"
+                                                : r.isin
+                                                  ? "Copy ISIN"
+                                                  : "No ISIN"}
+                                            </p>
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      </TooltipProvider>
+                                      <div className="min-w-0">
+                                        <div className="truncate font-medium text-foreground">
+                                          {r.name}
+                                        </div>
+                                        <div className="text-[10px] tabular-nums text-foreground-muted">
+                                          {r.ticker}
+                                          {r.isin ? ` · ${r.isin}` : ""}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                  {key === "qty" && <span className="tabular-nums">{r.qty}</span>}
+                                  {key === "assetType" && (
+                                    <span className="text-foreground-muted">{r.assetType}</span>
+                                  )}
+                                  {key === "cur" && (
+                                    <span className="tabular-nums">{fmt$(r.cur)}</span>
+                                  )}
+                                  {key === "buy" && (
+                                    <span className="tabular-nums text-foreground-muted">
+                                      {fmt$(r.buy)}
+                                    </span>
+                                  )}
+                                  {key === "total" && (
+                                    <span className="tabular-nums font-medium">
+                                      {fmt$(r.total)}
+                                    </span>
+                                  )}
+                                  {key === "gl" && <PerfCell value={r.gl} money />}
+                                  {key === "weight" && (
+                                    <span className="tabular-nums text-foreground-muted">
+                                      {r.weight.toFixed(1)}%
+                                    </span>
+                                  )}
+                                  {key === "sector" && (
+                                    <span className="text-foreground-muted">{r.sector}</span>
+                                  )}
+                                  {key === "perf1D" && <PerfCell value={r.perf1D} />}
+                                  {key === "perfYTD" && <PerfCell value={r.perfYTD} />}
+                                  {key === "take" && (
+                                    <div className="flex justify-center">
+                                      <TakeBadge
+                                        theses={tickerTheses}
+                                        onOpen={openDrawer}
+                                        onCreate={() =>
+                                          openModal(undefined, { tickers: [r.ticker] })
+                                        }
+                                      />
+                                    </div>
+                                  )}
+                                </td>
+                              );
+                            })}
+                            {/* Row actions */}
+                            <td className="px-2 py-3">
+                              <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6"
+                                  onClick={() => setEditingHolding(raw)}
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 text-destructive hover:text-destructive"
+                                  onClick={() => handleDelete(raw)}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="transactions" className="m-0 p-4">
+              <TransactionHistoryTab portfolioId={portfolioId!} onDeleted={() => load()} />
+            </TabsContent>
           </div>
-        </div>
+        </Tabs>
 
         {/* Modals */}
         <AddHoldingModal
@@ -932,6 +977,16 @@ export default function PortfolioDetailPage() {
             }}
           />
         )}
+
+        <ImportTransactionsModal
+          open={importOpen}
+          onOpenChange={setImportOpen}
+          portfolioId={portfolioId!}
+          onImported={() => {
+            setActiveTab("transactions");
+            load();
+          }}
+        />
       </div>
     </div>
   );
