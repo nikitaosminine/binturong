@@ -673,6 +673,7 @@ function toConceptQuery(input: { title: string; summary: string; tickers: string
 
 interface GrokChatResponse {
   choices?: Array<{
+    finish_reason?: string | null;
     message?: {
       content?: string | null;
     };
@@ -857,6 +858,7 @@ async function getPricesByTicker(
   firstDate: Date,
 ): Promise<Map<string, Map<string, number>>> {
   const client = db(env);
+  const allPriceRows: Array<{ yahoo_ticker: string; date: string; closing_price: number }> = [];
   const entries = await Promise.all(
     tickers.map(async (ticker) => {
       try {
@@ -866,11 +868,7 @@ async function getPricesByTicker(
           date,
           closing_price,
         }));
-        for (let i = 0; i < priceRows.length; i += 500) {
-          await client.from("price_history").upsert(priceRows.slice(i, i + 500), {
-            onConflict: "yahoo_ticker,date",
-          });
-        }
+        allPriceRows.push(...priceRows);
         return [ticker, dateMap] as const;
       } catch (error) {
         console.error(`price fetch failed for ${ticker}`, error);
@@ -878,6 +876,11 @@ async function getPricesByTicker(
       }
     }),
   );
+  if (allPriceRows.length > 0) {
+    await client.from("price_history").upsert(allPriceRows, {
+      onConflict: "yahoo_ticker,date",
+    });
+  }
   return new Map(entries);
 }
 
@@ -1013,10 +1016,13 @@ function computeSnapshotForDate(
 async function recomputeSnapshots(env: Env, portfolioId: string): Promise<void> {
   const client = db(env);
   const txns = await loadPortfolioTransactions(env, portfolioId);
+  console.log("[recompute] transactions fetched:", txns.length);
   await rebuildCurrentHoldings(env, portfolioId);
 
   if (txns.length === 0) {
     await client.from("portfolio_snapshots").delete().eq("portfolio_id", portfolioId);
+    console.log("[recompute] snapshots built:", 0);
+    console.log("[recompute] insert result:", JSON.stringify(null));
     return;
   }
 
@@ -1043,10 +1049,15 @@ async function recomputeSnapshots(env: Env, portfolioId: string): Promise<void> 
     });
     cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
+  console.log("[recompute] snapshots built:", snapshots.length);
 
   await client.from("portfolio_snapshots").delete().eq("portfolio_id", portfolioId);
   for (let i = 0; i < snapshots.length; i += 500) {
-    await client.from("portfolio_snapshots").insert(snapshots.slice(i, i + 500));
+    const { error: insertError } = await client
+      .from("portfolio_snapshots")
+      .insert(snapshots.slice(i, i + 500));
+    console.log("[recompute] insert result:", JSON.stringify(insertError));
+    if (insertError) throw new Error(insertError.message);
   }
 }
 
@@ -1912,6 +1923,17 @@ export default {
       }
     }
 
+    const recomputeMatch = pathname.match(/^\/api\/portfolios\/([^/]+)\/recompute$/);
+    if (recomputeMatch && method === "POST") {
+      const portfolioId = recomputeMatch[1];
+      const accessError = await requirePortfolioAccess(request, env, portfolioId);
+      if (accessError) return accessError;
+      console.log("[recompute] triggered for portfolio", portfolioId);
+      await recomputeSnapshots(env, portfolioId);
+      console.log("[recompute] done");
+      return json({ ok: true });
+    }
+
     const transactionPreviewMatch = pathname.match(/^\/api\/portfolios\/([^/]+)\/transactions\/preview$/);
     if (transactionPreviewMatch && method === "POST") {
       const portfolioId = transactionPreviewMatch[1];
@@ -1937,7 +1959,7 @@ export default {
         'Return only JSON: { "columns_detected": string[], "rows": [...], "errors": string[] }',
         "",
         "CSV:",
-        csv.slice(0, 8000),
+        csv.slice(0, 100000),
       ].join("\n");
 
       try {
@@ -1951,22 +1973,40 @@ export default {
             model: env.GROK_WEB_SEARCH_MODEL || "grok-4-1-fast-non-reasoning",
             messages: [{ role: "user", content: prompt }],
             response_format: { type: "json_object" },
+            max_tokens: 32000,
           }),
         });
         if (!res.ok) {
           const text = await res.text();
           return json({ error: `Normalization failed (${res.status}): ${text.slice(0, 300)}` }, 502);
         }
-        const data = (await res.json()) as GrokChatResponse;
-        const parsed = extractJsonObject(data.choices?.[0]?.message?.content ?? "{}");
-        const rows = normalizeTransactionRows((Array.isArray(parsed.rows) ? parsed.rows : []) as NormalisedTransactionRow[]);
-        return json({
-          columns_detected: Array.isArray(parsed.columns_detected)
-            ? parsed.columns_detected.map((column) => String(column))
-            : [],
-          rows,
-          errors: Array.isArray(parsed.errors) ? parsed.errors.map((error) => String(error)) : [],
-        });
+        const llmData = (await res.json()) as GrokChatResponse;
+        const content: string = llmData.choices?.[0]?.message?.content ?? "";
+
+        console.log("[csv-preview] finish_reason:", llmData.choices?.[0]?.finish_reason);
+        console.log("[csv-preview] content length:", content.length);
+        console.log("[csv-preview] content snippet:", content.slice(0, 300));
+
+        const stripped = content
+          .trim()
+          .replace(/^```json\s*/i, "")
+          .replace(/^```\s*/i, "")
+          .replace(/```\s*$/i, "")
+          .trim();
+
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(stripped) as Record<string, unknown>;
+        } catch {
+          const start = stripped.indexOf("{");
+          const end = stripped.lastIndexOf("}");
+          if (start >= 0 && end > start) {
+            parsed = JSON.parse(stripped.slice(start, end + 1)) as Record<string, unknown>;
+          } else {
+            throw new Error(`LLM returned unparseable content: ${stripped.slice(0, 300)}`);
+          }
+        }
+        return json(parsed);
       } catch (error) {
         return json({ error: error instanceof Error ? error.message : "Preview failed" }, 500);
       }
