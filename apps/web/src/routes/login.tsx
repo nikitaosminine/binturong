@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { BarChart3 } from "lucide-react";
+import { NodeLogo } from "@/components/node-logo";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
@@ -60,11 +60,9 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
       <div className="w-full max-w-sm">
         {/* Logo */}
-        <div className="flex items-center gap-2 justify-center mb-6">
-          <div className="h-8 w-8 rounded-md bg-primary/20 border border-primary/30 flex items-center justify-center text-primary">
-            <BarChart3 className="h-4 w-4" />
-          </div>
-          <span className="text-lg font-semibold tracking-tight">Binturong</span>
+        <div className="mb-8 flex items-center justify-center gap-3">
+          <NodeLogo className="h-16 w-16" />
+          <span className="text-3xl font-semibold tracking-tight">Node</span>
         </div>
 
         {/* Card */}
@@ -76,7 +74,7 @@ export default function LoginPage() {
             <p className="text-xs text-muted-foreground">
               {isSignUp
                 ? "Start tracking your portfolio in minutes."
-                : "Sign in to continue to Binturong."}
+                : "Sign in to continue to Node."}
             </p>
           </div>
 

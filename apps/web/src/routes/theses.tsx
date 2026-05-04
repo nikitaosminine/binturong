@@ -243,44 +243,7 @@ export default function ThesesPage() {
             <section className="flex min-h-0 flex-col overflow-y-auto rounded-xl border border-border/50 bg-card p-5">
               <div className="mb-4 flex items-start justify-between">
                 <div>
-                  <h2 className="flex items-center gap-2 text-lg font-semibold">
-                    Trace feed
-                    <svg
-                      width="18"
-                      height="18"
-                      viewBox="0 0 18 18"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="shrink-0"
-                      aria-hidden="true"
-                    >
-                      <defs>
-                        <filter id="bisect-glow" x="-50%" y="-50%" width="200%" height="200%">
-                          <feGaussianBlur stdDeviation="1.4" result="blur" />
-                          <feMerge>
-                            <feMergeNode in="blur" />
-                            <feMergeNode in="SourceGraphic" />
-                          </feMerge>
-                        </filter>
-                      </defs>
-                      <circle
-                        cx="9"
-                        cy="9"
-                        r="5.5"
-                        fill="white"
-                        fillOpacity="0.92"
-                        filter="url(#bisect-glow)"
-                      />
-                      <line
-                        x1="9"
-                        y1="0"
-                        x2="9"
-                        y2="18"
-                        stroke="var(--background)"
-                        strokeWidth="1.2"
-                      />
-                    </svg>
-                  </h2>
+                  <h2 className="text-lg font-semibold">Trace feed</h2>
                   <p className="text-xs text-muted-foreground">
                     Signals mapped to your theses — review and act with context.
                   </p>
@@ -420,7 +383,11 @@ export default function ThesesPage() {
                         onClick={() =>
                           setCollapsedBuckets((prev) => {
                             const next = new Set(prev);
-                            next.has(bucket) ? next.delete(bucket) : next.add(bucket);
+                            if (next.has(bucket)) {
+                              next.delete(bucket);
+                            } else {
+                              next.add(bucket);
+                            }
                             return next;
                           })
                         }

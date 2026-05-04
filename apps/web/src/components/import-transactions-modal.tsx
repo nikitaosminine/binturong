@@ -3,6 +3,8 @@ import { AlertCircle, FileText, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
+import { TextShimmer } from "@/components/loading-ui/text-shimmer";
+import { Progress } from "@/components/ui/progress";
 import {
   Dialog,
   DialogContent,
@@ -59,6 +61,25 @@ const SIDE_COLOURS: Record<Side, string> = {
   FEE: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
 };
 
+type PreviewProgressStage =
+  | "idle"
+  | "selected"
+  | "reading"
+  | "sending"
+  | "normalizing"
+  | "parsing"
+  | "complete";
+
+const PREVIEW_PROGRESS: Record<PreviewProgressStage, { label: string; value: number }> = {
+  idle: { label: "Select a CSV to begin", value: 0 },
+  selected: { label: "Ready to preview", value: 15 },
+  reading: { label: "Reading CSV", value: 25 },
+  sending: { label: "Sending to normalizer", value: 40 },
+  normalizing: { label: "Normalizing transactions", value: 75 },
+  parsing: { label: "Parsing normalized rows", value: 90 },
+  complete: { label: "Ready to review", value: 100 },
+};
+
 async function authHeaders() {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
@@ -75,19 +96,27 @@ export function ImportTransactionsModal({ open, onOpenChange, portfolioId, onImp
   const [dragOver, setDragOver] = useState(false);
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
+  const [previewStage, setPreviewStage] = useState<PreviewProgressStage>("idle");
 
   const reset = () => {
     setStep("upload");
     setFile(null);
     setPreview(null);
     setLoading(false);
+    setPreviewStage("idle");
+  };
+
+  const selectFile = (nextFile: File | null) => {
+    setFile(nextFile);
+    setPreview(null);
+    setPreviewStage(nextFile ? "selected" : "idle");
   };
 
   const handleDrop = useCallback((event: React.DragEvent) => {
     event.preventDefault();
     setDragOver(false);
     const dropped = event.dataTransfer.files[0];
-    if (dropped && dropped.name.toLowerCase().endsWith(".csv")) setFile(dropped);
+    if (dropped && dropped.name.toLowerCase().endsWith(".csv")) selectFile(dropped);
     else toast.error("Please drop a CSV file");
   }, []);
 
@@ -95,21 +124,28 @@ export function ImportTransactionsModal({ open, onOpenChange, portfolioId, onImp
     if (!file) return;
     setLoading(true);
     try {
+      setPreviewStage("reading");
       const csv = await file.text();
+      setPreviewStage("sending");
+      const headers = await authHeaders();
+      setPreviewStage("normalizing");
       const res = await fetch(
         `${API_BASE_URL}/api/portfolios/${portfolioId}/transactions/preview`,
         {
           method: "POST",
-          headers: await authHeaders(),
+          headers,
           body: JSON.stringify({ csv }),
         },
       );
+      setPreviewStage("parsing");
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Preview failed");
       setPreview(data as PreviewResponse);
-      setStep("review");
+      setPreviewStage("complete");
+      window.setTimeout(() => setStep("review"), 250);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to parse CSV");
+      setPreviewStage(file ? "selected" : "idle");
     } finally {
       setLoading(false);
     }
@@ -192,12 +228,22 @@ export function ImportTransactionsModal({ open, onOpenChange, portfolioId, onImp
                 type="file"
                 accept=".csv"
                 className="hidden"
-                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                onChange={(event) => selectFile(event.target.files?.[0] ?? null)}
               />
             </label>
 
+            {(file || loading) && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                  <span className="truncate">{PREVIEW_PROGRESS[previewStage].label}</span>
+                  <span className="tabular-nums">{PREVIEW_PROGRESS[previewStage].value}%</span>
+                </div>
+                <Progress value={PREVIEW_PROGRESS[previewStage].value} />
+              </div>
+            )}
+
             <Button onClick={handlePreview} disabled={!file || loading} className="w-full">
-              {loading ? "Analyzing..." : "Preview transactions"}
+              {loading ? <TextShimmer>Analyzing</TextShimmer> : "Preview transactions"}
             </Button>
           </div>
         )}
@@ -272,7 +318,11 @@ export function ImportTransactionsModal({ open, onOpenChange, portfolioId, onImp
                 disabled={loading || preview.rows.length === 0}
                 className="flex-1"
               >
-                {loading ? "Importing..." : `Confirm ${preview.rows.length} transactions`}
+                {loading ? (
+                  <TextShimmer>Importing</TextShimmer>
+                ) : (
+                  `Confirm ${preview.rows.length} transactions`
+                )}
               </Button>
             </div>
           </div>

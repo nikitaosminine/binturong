@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { BarChart3, ChevronLeft, LogOut, Settings } from "lucide-react";
+import { NodeLogo } from "@/components/node-logo";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -49,13 +50,21 @@ export function AppSidebar({ children }: { children: ReactNode }) {
         }`}
       >
         {/* Logo */}
-        <div className="flex h-14 items-center justify-between border-b border-hairline px-3">
-          <Link to="/portfolios" className="flex items-center gap-2 overflow-hidden">
-            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent-teal/15 text-accent-teal">
-              <BarChart3 className="h-4 w-4" />
-            </div>
+        <div
+          className={`flex h-14 items-center border-b border-hairline ${
+            collapsed ? "justify-between gap-1 px-2" : "justify-between px-3"
+          }`}
+        >
+          <Link
+            to="/portfolios"
+            aria-label="Node home"
+            className={`flex min-w-0 items-center ${
+              collapsed ? "shrink-0 justify-center overflow-visible" : "gap-2 overflow-hidden"
+            }`}
+          >
+            <NodeLogo className={collapsed ? "h-8 w-8" : "h-9 w-9"} />
             {!collapsed && (
-              <span className="truncate text-sm font-semibold tracking-tight">Binturong</span>
+              <span className="truncate text-base font-semibold tracking-tight">Node</span>
             )}
           </Link>
           <button
