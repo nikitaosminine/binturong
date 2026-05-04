@@ -42,7 +42,7 @@ function TreemapNode(props: ContentProps) {
   const fill = PALETTE[index % PALETTE.length];
   const textFill = TEXT_PALETTE[index % TEXT_PALETTE.length];
   const pct = total > 0 ? (value / total) * 100 : 0;
-  const showLabel = width > 44 && height > 22;
+  const showLabel = width > 100 && height > 22;
   const showPct = showLabel && width > 64 && height > 38;
   const clipId = `clip-alloc-${index}`;
 
@@ -65,7 +65,7 @@ function TreemapNode(props: ContentProps) {
           x={x + 10}
           y={y + (showPct ? 17 : Math.min(18, height - 8))}
           fill={textFill}
-          fontSize={11}
+          fontSize={12}
           fontWeight={500}
           fontFamily="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
           clipPath={`url(#${clipId})`}
@@ -79,10 +79,9 @@ function TreemapNode(props: ContentProps) {
           x={x + 10}
           y={y + (showLabel ? 32 : 18)}
           fill={textFill}
-          fontSize={10}
+          fontSize={11}
           fontWeight={400}
           fontFamily="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
-          fillOpacity={0.8}
           clipPath={`url(#${clipId})`}
           style={{ pointerEvents: "none" }}
         >
