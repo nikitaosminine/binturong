@@ -42,15 +42,14 @@ function TreemapNode(props: ContentProps) {
   const fill = PALETTE[index % PALETTE.length];
   const textFill = TEXT_PALETTE[index % TEXT_PALETTE.length];
   const pct = total > 0 ? (value / total) * 100 : 0;
-  const showLabel = width > 100 && height > 22;
-  const showPct = showLabel && width > 64 && height > 38;
-  const clipId = `clip-alloc-${index}`;
+  const labelWidth = Math.max(0, width - 16);
+  const labelHeight = Math.max(0, height - 12);
+  const canShowLabel = labelWidth >= 38 && labelHeight >= 16;
+  const showTwoLine = labelWidth >= 46 && labelHeight >= 34;
+  const pctLabel = `${pct.toFixed(1)}%`;
 
   return (
     <g>
-      <clipPath id={clipId}>
-        <rect x={x + 2} y={y + 2} width={Math.max(0, width - 4)} height={Math.max(0, height - 4)} />
-      </clipPath>
       <rect
         x={x}
         y={y}
@@ -60,33 +59,24 @@ function TreemapNode(props: ContentProps) {
         ry={6}
         style={{ fill, stroke: "var(--background)", strokeWidth: 2 }}
       />
-      {showLabel && (
-        <text
-          x={x + 10}
-          y={y + (showPct ? 17 : Math.min(18, height - 8))}
-          fill={textFill}
-          fontSize={12}
-          fontWeight={500}
-          fontFamily="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
-          clipPath={`url(#${clipId})`}
-          style={{ pointerEvents: "none" }}
-        >
-          {name}
-        </text>
-      )}
-      {showPct && (
-        <text
-          x={x + 10}
-          y={y + (showLabel ? 32 : 18)}
-          fill={textFill}
-          fontSize={11}
-          fontWeight={400}
-          fontFamily="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
-          clipPath={`url(#${clipId})`}
-          style={{ pointerEvents: "none" }}
-        >
-          {pct.toFixed(1)}%
-        </text>
+      {canShowLabel && (
+        <foreignObject x={x + 8} y={y + 6} width={labelWidth} height={labelHeight}>
+          <div
+            className="flex h-full min-w-0 flex-col overflow-hidden text-[12px] leading-tight"
+            style={{ color: textFill, pointerEvents: "none" }}
+          >
+            {showTwoLine ? (
+              <>
+                <div className="truncate font-medium">{name}</div>
+                <div className="truncate font-medium">{pctLabel}</div>
+              </>
+            ) : (
+              <div className="truncate font-medium">
+                {name} · {pctLabel}
+              </div>
+            )}
+          </div>
+        </foreignObject>
       )}
     </g>
   );

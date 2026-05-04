@@ -91,17 +91,17 @@
   --chart-accent: #0a0a0a;
 
   /* Allocation palette (used by treemaps + chips) */
-  --alloc-1: #2d2d2d;
+  --alloc-1: #050505;
   --alloc-1-text: #ffffff;
-  --alloc-2: #4a4a4a;
+  --alloc-2: #2f2f2f;
   --alloc-2-text: #ffffff;
-  --alloc-3: #707070;
+  --alloc-3: #676767;
   --alloc-3-text: #ffffff;
-  --alloc-4: #999999;
+  --alloc-4: #a6a6a6;
   --alloc-4-text: #000000;
-  --alloc-5: #c0c0c0;
+  --alloc-5: #d2d2d2;
   --alloc-5-text: #000000;
-  --alloc-6: #dcdcdc;
+  --alloc-6: #f2f2f2;
   --alloc-6-text: #000000;
 
   --foreground-muted: oklch(0.5 0.01 260);
@@ -157,17 +157,17 @@
 
   --chart-accent: #ffffff;
 
-  --alloc-1: #c8c8c8;
+  --alloc-1: #f5f5f5;
   --alloc-1-text: #000000;
-  --alloc-2: #a0a0a0;
+  --alloc-2: #b8b8b8;
   --alloc-2-text: #000000;
-  --alloc-3: #787878;
-  --alloc-3-text: #ffffff;
-  --alloc-4: #525252;
+  --alloc-3: #7a7a7a;
+  --alloc-3-text: #000000;
+  --alloc-4: #4f4f4f;
   --alloc-4-text: #ffffff;
-  --alloc-5: #363636;
+  --alloc-5: #2d2d2d;
   --alloc-5-text: #ffffff;
-  --alloc-6: #242424;
+  --alloc-6: #121212;
   --alloc-6-text: #ffffff;
 
   --foreground-muted: oklch(0.72 0 0);
