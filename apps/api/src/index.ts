@@ -193,6 +193,7 @@ interface YahooQuoteItem {
   currentPrice: number | null;
   change1dPercent: number | null;
   sector: string | null;
+  assetType: string | null;
 }
 
 interface YahooChartResponse {
@@ -221,6 +222,8 @@ interface YahooQuoteResponse {
       regularMarketPrice?: number | null;
       regularMarketPreviousClose?: number | null;
       regularMarketChangePercent?: number | null;
+      quoteType?: string | null;
+      typeDisp?: string | null;
     }>;
   };
 }
@@ -360,6 +363,7 @@ interface MarketQuotesResult {
     change1dPercent: number | null;
     ytdChangePercent: number | null;
     sector: string;
+    assetType: string | null;
   }>;
 }
 
@@ -740,6 +744,7 @@ async function getQuotesFromBatch(symbols: string[]): Promise<Record<string, Yah
       currentPrice,
       change1dPercent,
       sector: null,
+      assetType: normalizeYahooAssetType(row.quoteType, row.typeDisp),
     };
     return acc;
   }, {});
@@ -755,6 +760,10 @@ async function getQuoteFromChart(symbol: string): Promise<YahooQuoteItem> {
 
     const chart = await fetchJson<YahooChartResponse>(url.toString());
     const series = chart.chart?.result?.[0];
+    const assetType = normalizeYahooAssetType(
+      series?.meta?.instrumentType,
+      series?.meta?.quoteType,
+    );
     const closes = (series?.indicators?.quote?.[0]?.close ?? []).filter(
       (value): value is number => value != null,
     );
@@ -769,12 +778,14 @@ async function getQuoteFromChart(symbol: string): Promise<YahooQuoteItem> {
       currentPrice: latestClose,
       change1dPercent,
       sector: null,
+      assetType,
     };
   } catch {
     return {
       currentPrice: null,
       change1dPercent: null,
       sector: null,
+      assetType: null,
     };
   }
 }
@@ -841,8 +852,9 @@ async function fetchHistoricalPrices(
 
   const chart = await fetchJson<YahooChartResponse>(url.toString());
   const result = chart.chart?.result?.[0];
-  const instrumentType = normalizeYahooInstrumentType(
-    result?.meta?.instrumentType ?? result?.meta?.quoteType ?? null,
+  const instrumentType = normalizeYahooAssetType(
+    result?.meta?.instrumentType,
+    result?.meta?.quoteType,
   );
   const timestamps = result?.timestamp ?? [];
   const closes = result?.indicators?.quote?.[0]?.close ?? [];
@@ -857,6 +869,24 @@ async function fetchHistoricalPrices(
   return { prices: dateMap, type: instrumentType };
 }
 
+async function getAssetTypesFromBatch(symbols: string[]): Promise<Map<string, string>> {
+  if (symbols.length === 0) return new Map();
+
+  const url = new URL("https://query1.finance.yahoo.com/v7/finance/quote");
+  url.searchParams.set("symbols", symbols.join(","));
+
+  const data = await fetchJson<YahooQuoteResponse>(url.toString());
+  const rows = data.quoteResponse?.result ?? [];
+  const typeByTicker = new Map<string, string>();
+  for (const row of rows) {
+    const symbol = row.symbol?.toUpperCase();
+    if (!symbol) continue;
+    const assetType = normalizeYahooAssetType(row.quoteType, row.typeDisp);
+    if (assetType) typeByTicker.set(symbol, assetType);
+  }
+  return typeByTicker;
+}
+
 async function getPricesByTicker(
   env: Env,
   tickers: string[],
@@ -867,7 +897,10 @@ async function getPricesByTicker(
 }> {
   const client = db(env);
   const allPriceRows: Array<{ yahoo_ticker: string; date: string; closing_price: number }> = [];
-  const typeByTicker = new Map<string, string>();
+  const typeByTicker = await getAssetTypesFromBatch(tickers).catch((error) => {
+    console.error("asset type fetch failed", error);
+    return new Map<string, string>();
+  });
   const entries = await Promise.all(
     tickers.map(async (ticker) => {
       try {
@@ -878,7 +911,9 @@ async function getPricesByTicker(
           closing_price,
         }));
         allPriceRows.push(...priceRows);
-        if (type) typeByTicker.set(ticker.toUpperCase(), type);
+        if (type && !typeByTicker.has(ticker.toUpperCase())) {
+          typeByTicker.set(ticker.toUpperCase(), type);
+        }
         return [ticker, dateMap] as const;
       } catch (error) {
         console.error(`price fetch failed for ${ticker}`, error);
@@ -894,12 +929,31 @@ async function getPricesByTicker(
   return { pricesByTicker: new Map(entries), typeByTicker };
 }
 
-function normalizeYahooInstrumentType(value: string | null | undefined): string | null {
-  const instrumentType = value?.trim().toUpperCase();
-  if (!instrumentType) return null;
-  if (instrumentType === "ETF") return "ETF";
-  if (instrumentType === "EQUITY" || instrumentType === "STOCK") return "Equity";
-  return instrumentType;
+function normalizeYahooAssetType(...values: Array<string | null | undefined>): string | null {
+  for (const raw of values) {
+    const value = raw?.trim();
+    if (!value) continue;
+    const normalized = value.toUpperCase().replace(/[_-]+/g, " ");
+    if (normalized === "ETF" || normalized.includes("EXCHANGE TRADED FUND")) return "ETF";
+    if (
+      normalized === "MUTUALFUND" ||
+      normalized === "MUTUAL FUND" ||
+      normalized === "FUND" ||
+      normalized.endsWith(" FUND") ||
+      normalized.includes("OPEN END FUND")
+    ) {
+      return "Fund";
+    }
+    if (
+      normalized === "EQUITY" ||
+      normalized === "STOCK" ||
+      normalized === "COMMON STOCK" ||
+      normalized.includes("EQUITY")
+    ) {
+      return "Equity";
+    }
+  }
+  return null;
 }
 
 function getCarryForwardPrice(dateMap: Map<string, number> | undefined, dateStr: string): number {
@@ -1415,6 +1469,7 @@ async function runMarketQuotesTool(input: { tickers: string[] }): Promise<Market
         change1dPercent: quote?.change1dPercent ?? null,
         ytdChangePercent: ytdChanges[index] ?? null,
         sector: sectorsBySymbol[ticker] ?? quote?.sector ?? "Other",
+        assetType: quote?.assetType ?? null,
       };
     }),
   };
@@ -2248,6 +2303,7 @@ export default {
             currentPrice: null,
             change1dPercent: null,
             sector: null,
+            assetType: null,
           } satisfies YahooQuoteItem);
         return {
           ticker: symbol,
@@ -2255,6 +2311,7 @@ export default {
           change1dPercent: quote.change1dPercent,
           ytdChangePercent: ytdChanges[i],
           sector: sectorsBySymbol[symbol] ?? quote.sector ?? "Other",
+          assetType: quote.assetType,
         };
       });
 

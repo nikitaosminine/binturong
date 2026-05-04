@@ -77,12 +77,17 @@ function fmtPct(n: number) {
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
 }
 
-function normalizeAssetType(assetType: string | null) {
-  const value = assetType?.trim().toLowerCase();
+function normalizeAssetType(assetType: string | null, name = "", ticker = "") {
+  const rawValue = assetType?.trim().toLowerCase();
+  const value =
+    rawValue && rawValue !== "other" && rawValue !== "n/a"
+      ? rawValue
+      : `${name} ${ticker}`.trim().toLowerCase();
   if (!value) return "Other";
-  if (value.includes("etf")) return "ETF";
+  if (/\betf\b|exchange traded fund/.test(value)) return "ETF";
+  if (/\bmutual\s*fund\b|\bfund\b|\buc\b|\bucits\b|open end fund/.test(value)) return "Fund";
   if (value.includes("bond") || value.includes("fixed")) return "Bonds";
-  if (value.includes("equity") || value.includes("stock")) return "Equity";
+  if (/\bequity\b|\bstock\b/.test(value)) return "Equity";
   if (value.includes("cash")) return "Cash";
   return "Other";
 }
@@ -91,7 +96,7 @@ function inferSectorFromHolding(ticker: string, name: string, assetType: string 
   const symbol = ticker.toUpperCase();
   const baseTicker = symbol.split(".")[0];
   const label = name.toLowerCase();
-  const type = (assetType || "").toLowerCase();
+  const type = normalizeAssetType(assetType, name, ticker);
 
   const explicitTickerSector: Record<string, string> = {
     "SU.PA": "Industrials",
@@ -102,12 +107,33 @@ function inferSectorFromHolding(ticker: string, name: string, assetType: string 
   if (explicitTickerSector[symbol]) return explicitTickerSector[symbol];
   if (explicitTickerSector[baseTicker]) return explicitTickerSector[baseTicker];
 
-  if (type.includes("etf") || type.includes("fund")) {
-    if (label.includes("tech") || label.includes("nasdaq")) return "Technology";
+  if (type === "ETF" || type === "Fund") {
+    if (
+      label.includes("tech") ||
+      label.includes("technology") ||
+      label.includes("nasdaq") ||
+      label.includes("semiconductor")
+    ) {
+      return "Technology";
+    }
     if (label.includes("energy")) return "Energy";
-    if (label.includes("europe") || label.includes("msci") || label.includes("s&p"))
+    if (label.includes("industrial")) return "Industrials";
+    if (label.includes("financial") || label.includes("bank")) return "Financials";
+    if (label.includes("healthcare") || label.includes("health")) return "Healthcare";
+    if (
+      label.includes("europe") ||
+      label.includes("msci") ||
+      label.includes("s&p") ||
+      label.includes("stoxx") ||
+      label.includes("world") ||
+      label.includes("emerging") ||
+      label.includes("japan") ||
+      label.includes("topix") ||
+      label.includes("screen")
+    ) {
       return "Broad Market";
-    return "ETF";
+    }
+    return "Broad Market";
   }
 
   if (label.includes("electric") || label.includes("industrial")) return "Industrials";
@@ -158,6 +184,7 @@ interface LiveQuote {
   change1dPercent: number | null;
   ytdChangePercent: number | null;
   sector?: string | null;
+  assetType?: string | null;
 }
 
 const API_BASE_URL =
@@ -308,8 +335,9 @@ export default function PortfolioDetailPage() {
         sector:
           live?.sector && live.sector !== "Other"
             ? live.sector
-            : inferSectorFromHolding(h.ticker, h.name, h.asset_type) || getSector(h.ticker),
-        assetType: normalizeAssetType(h.asset_type),
+            : inferSectorFromHolding(h.ticker, h.name, live?.assetType ?? h.asset_type) ||
+              getSector(h.ticker),
+        assetType: normalizeAssetType(live?.assetType ?? h.asset_type, h.name, h.ticker),
         perf1D,
         perfYTD,
         _raw: h,
