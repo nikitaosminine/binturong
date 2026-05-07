@@ -144,8 +144,13 @@ export type Database = {
       holdings: {
         Row: {
           asset_type: string | null;
+          country_code: string | null;
+          country_name: string | null;
           created_at: string;
           fees: number;
+          geography_checked_at: string | null;
+          geography_confidence: number;
+          geography_source: string;
           id: string;
           isin: string | null;
           name: string;
@@ -158,8 +163,13 @@ export type Database = {
         };
         Insert: {
           asset_type?: string | null;
+          country_code?: string | null;
+          country_name?: string | null;
           created_at?: string;
           fees?: number;
+          geography_checked_at?: string | null;
+          geography_confidence?: number;
+          geography_source?: string;
           id?: string;
           isin?: string | null;
           name: string;
@@ -172,8 +182,13 @@ export type Database = {
         };
         Update: {
           asset_type?: string | null;
+          country_code?: string | null;
+          country_name?: string | null;
           created_at?: string;
           fees?: number;
+          geography_checked_at?: string | null;
+          geography_confidence?: number;
+          geography_source?: string;
           id?: string;
           isin?: string | null;
           name?: string;
@@ -187,6 +202,120 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "holdings_portfolio_id_fkey";
+            columns: ["portfolio_id"];
+            isOneToOne: false;
+            referencedRelation: "portfolios";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      holding_geography_allocations: {
+        Row: {
+          confidence: number;
+          country_code: string;
+          country_name: string;
+          created_at: string;
+          evidence: Json;
+          holding_id: string;
+          id: string;
+          portfolio_id: string;
+          source: string;
+          updated_at: string;
+          weight_pct: number;
+        };
+        Insert: {
+          confidence?: number;
+          country_code: string;
+          country_name: string;
+          created_at?: string;
+          evidence?: Json;
+          holding_id: string;
+          id?: string;
+          portfolio_id: string;
+          source: string;
+          updated_at?: string;
+          weight_pct: number;
+        };
+        Update: {
+          confidence?: number;
+          country_code?: string;
+          country_name?: string;
+          created_at?: string;
+          evidence?: Json;
+          holding_id?: string;
+          id?: string;
+          portfolio_id?: string;
+          source?: string;
+          updated_at?: string;
+          weight_pct?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "holding_geography_allocations_holding_id_fkey";
+            columns: ["holding_id"];
+            isOneToOne: false;
+            referencedRelation: "holdings";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "holding_geography_allocations_portfolio_id_fkey";
+            columns: ["portfolio_id"];
+            isOneToOne: false;
+            referencedRelation: "portfolios";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      geography_research_jobs: {
+        Row: {
+          attempts: number;
+          created_at: string;
+          finished_at: string | null;
+          holding_id: string;
+          id: string;
+          last_error: string | null;
+          portfolio_id: string;
+          reason: string | null;
+          started_at: string | null;
+          status: string;
+          updated_at: string;
+        };
+        Insert: {
+          attempts?: number;
+          created_at?: string;
+          finished_at?: string | null;
+          holding_id: string;
+          id?: string;
+          last_error?: string | null;
+          portfolio_id: string;
+          reason?: string | null;
+          started_at?: string | null;
+          status?: string;
+          updated_at?: string;
+        };
+        Update: {
+          attempts?: number;
+          created_at?: string;
+          finished_at?: string | null;
+          holding_id?: string;
+          id?: string;
+          last_error?: string | null;
+          portfolio_id?: string;
+          reason?: string | null;
+          started_at?: string | null;
+          status?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "geography_research_jobs_holding_id_fkey";
+            columns: ["holding_id"];
+            isOneToOne: true;
+            referencedRelation: "holdings";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "geography_research_jobs_portfolio_id_fkey";
             columns: ["portfolio_id"];
             isOneToOne: false;
             referencedRelation: "portfolios";

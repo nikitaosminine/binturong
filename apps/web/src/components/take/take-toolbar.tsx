@@ -1,4 +1,5 @@
 import { Search } from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
 import { Input } from "@/components/ui/input";
 import { ThesisStatus } from "@/lib/thesis";
 
@@ -17,6 +18,8 @@ interface TakeToolbarProps {
   onSearchChange: (value: string) => void;
 }
 
+const PILL_TRANSITION = { type: "spring", stiffness: 420, damping: 34, mass: 0.7 };
+
 export function TakeToolbar({
   tabs,
   selectedFilter,
@@ -24,6 +27,9 @@ export function TakeToolbar({
   search,
   onSearchChange,
 }: TakeToolbarProps) {
+  const shouldReduceMotion = useReducedMotion();
+  const pillTransition = shouldReduceMotion ? { duration: 0 } : PILL_TRANSITION;
+
   return (
     <div className="space-y-2">
       <div className="flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
@@ -31,13 +37,30 @@ export function TakeToolbar({
           <button
             key={tab.value}
             onClick={() => onFilterChange(tab.value)}
-            className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
-              selectedFilter === tab.value
-                ? "bg-foreground text-background"
-                : "text-foreground-muted hover:text-foreground"
-            }`}
+            className="group relative isolate rounded-full px-2.5 py-0.5 text-[11px] font-medium text-foreground-muted transition-colors hover:text-foreground"
           >
-            {tab.label}
+            {selectedFilter === tab.value && (
+              <motion.span
+                layoutId="take-toolbar-filter-pill"
+                className="pointer-events-none absolute inset-0 z-0 rounded-full bg-foreground"
+                transition={pillTransition}
+              />
+            )}
+            <span className="relative z-10 block text-transparent">{tab.label}</span>
+            <span
+              className={`absolute inset-0 z-10 grid place-items-center transition-opacity duration-75 ${
+                selectedFilter === tab.value ? "opacity-0" : "opacity-100"
+              }`}
+            >
+              {tab.label}
+            </span>
+            <span
+              className={`absolute inset-0 z-10 grid place-items-center text-background transition-opacity duration-100 ${
+                selectedFilter === tab.value ? "delay-100 opacity-100" : "opacity-0"
+              }`}
+            >
+              {tab.label}
+            </span>
           </button>
         ))}
       </div>

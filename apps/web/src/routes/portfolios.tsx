@@ -15,6 +15,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { OrbitRing } from "@/components/loading-ui/orbit-ring";
 
 interface Holding {
   id: string;
@@ -315,8 +316,9 @@ export default function PortfoliosPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">
-        Loading…
+      <div className="flex h-64 items-center justify-center gap-2 text-sm text-muted-foreground">
+        <OrbitRing className="size-6" />
+        <span>Loading portfolios.</span>
       </div>
     );
   }

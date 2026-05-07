@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, ChevronRight, X } from "lucide-react";
 import { useOutletContext } from "react-router-dom";
+import { motion, useReducedMotion } from "framer-motion";
 import { Thesis } from "@/lib/thesis";
 import { useAuth } from "@/hooks/use-auth";
 import { TakePageHeader } from "@/components/take/take-page-header";
@@ -50,6 +51,7 @@ type PeriodFilter = "All" | "Last week" | "Last month";
 const PERIOD_FILTERS: PeriodFilter[] = ["All", "Last week", "Last month"];
 
 type SortOrder = "desc" | "asc";
+const PILL_TRANSITION = { type: "spring", stiffness: 420, damping: 34, mass: 0.7 };
 const API_BASE_URL =
   import.meta.env.VITE_API_URL ?? "https://binturong-api.nikita-osminine.workers.dev";
 
@@ -67,6 +69,8 @@ export default function ThesesPage() {
   const [selectedThesis, setSelectedThesis] = useState<string | null>(null);
   const [selectedInsight, setSelectedInsight] = useState<string | null>(null);
   const [agentInsights, setAgentInsights] = useState<TakeInsight[]>([]);
+  const shouldReduceMotion = useReducedMotion();
+  const pillTransition = shouldReduceMotion ? { duration: 0 } : PILL_TRANSITION;
 
   useEffect(() => {
     if (!user?.id) return;
@@ -248,7 +252,7 @@ export default function ThesesPage() {
                     Signals mapped to your theses — review and act with context.
                   </p>
                 </div>
-                <span className="rounded-md border border-border/50 bg-muted px-2 py-1 text-[10px] text-muted-foreground">
+                <span className="inline-flex w-20 shrink-0 justify-center rounded-md border border-border/50 bg-muted px-2 py-1 text-[10px] tabular-nums text-muted-foreground">
                   Live · {visibleInsights.length}
                 </span>
               </div>
@@ -268,96 +272,156 @@ export default function ThesesPage() {
                 </div>
               )}
 
-              <div className="mb-3 flex flex-wrap items-center gap-3">
-                {/* Sentiment */}
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] uppercase tracking-wider text-foreground-muted">
-                    Sentiment
-                  </span>
-                  <div className="flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
-                    {FEED_FILTERS.map((status) => (
-                      <button
-                        key={status}
-                        onClick={() => setFeedFilter(status)}
-                        className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
-                          feedFilter === status
-                            ? "bg-foreground text-background"
-                            : "text-foreground-muted hover:text-foreground"
-                        }`}
-                      >
-                        {status}
-                      </button>
-                    ))}
+              <div className="mb-3 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+                <div className="flex min-w-0 flex-wrap items-center gap-3">
+                  {/* Sentiment */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] uppercase tracking-wider text-foreground-muted">
+                      Sentiment
+                    </span>
+                    <div className="flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
+                      {FEED_FILTERS.map((status) => (
+                        <button
+                          key={status}
+                          onClick={() => setFeedFilter(status)}
+                          className={`relative rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                            feedFilter === status
+                              ? ""
+                              : "text-foreground-muted hover:text-foreground"
+                          } isolate`}
+                        >
+                          {feedFilter === status && (
+                            <motion.span
+                              layoutId="take-feed-sentiment-pill"
+                              className="pointer-events-none absolute inset-0 z-0 rounded-full bg-foreground"
+                              transition={pillTransition}
+                            />
+                          )}
+                          <span
+                            className={`relative z-10 transition-colors duration-75 ${
+                              feedFilter === status
+                                ? "delay-100 text-background"
+                                : "text-foreground-muted"
+                            }`}
+                          >
+                            {status}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
 
-                {/* Source */}
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] uppercase tracking-wider text-foreground-muted">
-                    Source
-                  </span>
-                  <div className="flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
-                    {(["all", "agent", "market"] as const).map((source) => (
-                      <button
-                        key={source}
-                        onClick={() => setSourceFilter(source)}
-                        className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
-                          sourceFilter === source
-                            ? "bg-foreground text-background"
-                            : "text-foreground-muted hover:text-foreground"
-                        }`}
-                      >
-                        {source === "all" ? "All" : source === "agent" ? "Agent" : "Market"}
-                      </button>
-                    ))}
+                  {/* Source */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] uppercase tracking-wider text-foreground-muted">
+                      Source
+                    </span>
+                    <div className="flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
+                      {(["all", "agent", "market"] as const).map((source) => (
+                        <button
+                          key={source}
+                          onClick={() => setSourceFilter(source)}
+                          className={`relative rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                            sourceFilter === source
+                              ? ""
+                              : "text-foreground-muted hover:text-foreground"
+                          } isolate`}
+                        >
+                          {sourceFilter === source && (
+                            <motion.span
+                              layoutId="take-feed-source-pill"
+                              className="pointer-events-none absolute inset-0 z-0 rounded-full bg-foreground"
+                              transition={pillTransition}
+                            />
+                          )}
+                          <span
+                            className={`relative z-10 transition-colors duration-75 ${
+                              sourceFilter === source
+                                ? "delay-100 text-background"
+                                : "text-foreground-muted"
+                            }`}
+                          >
+                            {source === "all" ? "All" : source === "agent" ? "Agent" : "Market"}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
 
-                {/* Period */}
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] uppercase tracking-wider text-foreground-muted">
-                    Period
-                  </span>
-                  <div className="flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
-                    {PERIOD_FILTERS.map((period) => (
-                      <button
-                        key={period}
-                        onClick={() => setPeriodFilter(period)}
-                        className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
-                          periodFilter === period
-                            ? "bg-foreground text-background"
-                            : "text-foreground-muted hover:text-foreground"
-                        }`}
-                      >
-                        {period}
-                      </button>
-                    ))}
+                  {/* Period */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] uppercase tracking-wider text-foreground-muted">
+                      Period
+                    </span>
+                    <div className="flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
+                      {PERIOD_FILTERS.map((period) => (
+                        <button
+                          key={period}
+                          onClick={() => setPeriodFilter(period)}
+                          className={`relative rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                            periodFilter === period
+                              ? ""
+                              : "text-foreground-muted hover:text-foreground"
+                          } isolate`}
+                        >
+                          {periodFilter === period && (
+                            <motion.span
+                              layoutId="take-feed-period-pill"
+                              className="pointer-events-none absolute inset-0 z-0 rounded-full bg-foreground"
+                              transition={pillTransition}
+                            />
+                          )}
+                          <span
+                            className={`relative z-10 transition-colors duration-75 ${
+                              periodFilter === period
+                                ? "delay-100 text-background"
+                                : "text-foreground-muted"
+                            }`}
+                          >
+                            {period}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
 
                 {/* Sort order */}
-                <div className="ml-auto flex gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
+                <div className="relative flex shrink-0 gap-px rounded-full border border-hairline bg-surface-2 p-0.5">
+                  <motion.span
+                    className="pointer-events-none absolute inset-y-0.5 left-0.5 z-0 w-16 rounded-full bg-foreground"
+                    animate={{ x: sortOrder === "desc" ? 0 : 65 }}
+                    transition={pillTransition}
+                  />
                   <button
                     onClick={() => setSortOrder("desc")}
-                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
-                      sortOrder === "desc"
-                        ? "bg-foreground text-background"
-                        : "text-foreground-muted hover:text-foreground"
-                    }`}
+                    className={`relative w-16 rounded-full py-0.5 text-[11px] font-medium transition-colors ${
+                      sortOrder === "desc" ? "" : "text-foreground-muted hover:text-foreground"
+                    } isolate`}
                     title="Newest first"
                   >
-                    ↓ Newest
+                    <span
+                      className={`relative z-10 transition-colors duration-75 ${
+                        sortOrder === "desc" ? "delay-100 text-background" : "text-foreground-muted"
+                      }`}
+                    >
+                      ↓ Newest
+                    </span>
                   </button>
                   <button
                     onClick={() => setSortOrder("asc")}
-                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
-                      sortOrder === "asc"
-                        ? "bg-foreground text-background"
-                        : "text-foreground-muted hover:text-foreground"
-                    }`}
+                    className={`relative w-16 rounded-full py-0.5 text-[11px] font-medium transition-colors ${
+                      sortOrder === "asc" ? "" : "text-foreground-muted hover:text-foreground"
+                    } isolate`}
                     title="Oldest first"
                   >
-                    ↑ Oldest
+                    <span
+                      className={`relative z-10 transition-colors duration-75 ${
+                        sortOrder === "asc" ? "delay-100 text-background" : "text-foreground-muted"
+                      }`}
+                    >
+                      ↑ Oldest
+                    </span>
                   </button>
                 </div>
               </div>

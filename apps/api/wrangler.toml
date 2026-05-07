@@ -27,6 +27,10 @@ queue = "agent-runs"
 binding = "SNAPSHOT_QUEUE"
 queue = "snapshot-rebuild-queue"
 
+[[queues.producers]]
+binding = "GEOGRAPHY_QUEUE"
+queue = "geography-queue"
+
 [[queues.consumers]]
 queue = "agent-runs"
 
@@ -36,6 +40,12 @@ max_batch_size = 1
 max_batch_timeout = 5
 max_retries = 3
 dead_letter_queue = "snapshot-rebuild-dlq"
+
+[[queues.consumers]]
+queue = "geography-queue"
+max_batch_size = 1
+max_batch_timeout = 5
+max_retries = 3
 
 [triggers]
 # Hourly cron for scheduled fanout. Actual per-portfolio run times are selected
