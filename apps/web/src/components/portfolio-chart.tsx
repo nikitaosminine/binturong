@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Search } from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
 import {
   Area,
   AreaChart,
@@ -78,6 +80,8 @@ const chartConfig = {
     color: "var(--accent-teal)",
   },
 } satisfies ChartConfig;
+
+const PILL_TRANSITION = { type: "spring", stiffness: 420, damping: 34, mass: 0.7 };
 
 function fmtValue(n: number, mode: Mode) {
   if (mode === "value") {
@@ -161,6 +165,8 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
   const [barPeriod, setBarPeriod] = useState<BarPeriod>("M");
   const [chartSeries, setChartSeries] = useState<ChartSeries[]>([]);
   const [loading, setLoading] = useState(false);
+  const shouldReduceMotion = useReducedMotion();
+  const pillTransition = shouldReduceMotion ? { duration: 0 } : PILL_TRANSITION;
 
   const fetchChartData = useCallback(async () => {
     if (!portfolioId) return;
@@ -249,6 +255,16 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
 
   return (
     <div className="flex flex-col gap-3">
+      <div className="flex h-9 items-center gap-2 rounded-full border border-hairline bg-surface-2 px-3 text-foreground-muted">
+        <Search className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        <input
+          aria-label="Search portfolio"
+          disabled
+          placeholder="Search..."
+          className="min-w-0 flex-1 bg-transparent text-xs text-foreground placeholder:text-foreground-muted disabled:cursor-default disabled:opacity-100 focus:outline-none"
+        />
+      </div>
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div
           className="flex gap-1 rounded-full border border-hairline bg-surface-2 p-1"
@@ -261,13 +277,18 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
               role="tab"
               aria-selected={view === item}
               onClick={() => setView(item)}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                view === item
-                  ? "bg-foreground text-background"
-                  : "text-foreground-muted hover:text-foreground"
-              }`}
+              className={`relative rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                view === item ? "text-background" : "text-foreground-muted hover:text-foreground"
+              } isolate`}
             >
-              {item === "line" ? "Line" : "Returns"}
+              {view === item && (
+                <motion.span
+                  layoutId="portfolio-chart-view-pill"
+                  className="pointer-events-none absolute inset-0 z-0 rounded-full bg-foreground"
+                  transition={pillTransition}
+                />
+              )}
+              <span className="relative z-10">{item === "line" ? "Line" : "Returns"}</span>
             </button>
           ))}
         </div>
@@ -290,13 +311,18 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
                 role="tab"
                 aria-selected={mode === id}
                 onClick={() => setMode(id)}
-                className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                  mode === id
-                    ? "bg-foreground text-background"
-                    : "text-foreground-muted hover:text-foreground"
-                }`}
+                className={`relative rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                  mode === id ? "text-background" : "text-foreground-muted hover:text-foreground"
+                } isolate`}
               >
-                {label}
+                {mode === id && (
+                  <motion.span
+                    layoutId="portfolio-chart-mode-pill"
+                    className="pointer-events-none absolute inset-0 z-0 rounded-full bg-foreground"
+                    transition={pillTransition}
+                  />
+                )}
+                <span className="relative z-10">{label}</span>
               </button>
             ))}
           </div>
@@ -314,13 +340,20 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
                   role="tab"
                   aria-selected={range === item.id}
                   onClick={() => setRange(item.id)}
-                  className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                  className={`relative rounded-full px-3 py-1 text-xs font-medium transition-colors ${
                     range === item.id
-                      ? "bg-foreground text-background"
+                      ? "text-background"
                       : "text-foreground-muted hover:text-foreground"
-                  }`}
+                  } isolate`}
                 >
-                  {item.label}
+                  {range === item.id && (
+                    <motion.span
+                      layoutId="portfolio-chart-range-pill"
+                      className="pointer-events-none absolute inset-0 z-0 rounded-full bg-foreground"
+                      transition={pillTransition}
+                    />
+                  )}
+                  <span className="relative z-10">{item.label}</span>
                 </button>
               ))
             : barPeriods.map((item) => (
@@ -329,22 +362,29 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
                   role="tab"
                   aria-selected={barPeriod === item.id}
                   onClick={() => setBarPeriod(item.id)}
-                  className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                  className={`relative rounded-full px-3 py-1 text-xs font-medium transition-colors ${
                     barPeriod === item.id
-                      ? "bg-foreground text-background"
+                      ? "text-background"
                       : "text-foreground-muted hover:text-foreground"
-                  }`}
+                  } isolate`}
                 >
-                  {item.label}
+                  {barPeriod === item.id && (
+                    <motion.span
+                      layoutId="portfolio-chart-period-pill"
+                      className="pointer-events-none absolute inset-0 z-0 rounded-full bg-foreground"
+                      transition={pillTransition}
+                    />
+                  )}
+                  <span className="relative z-10">{item.label}</span>
                 </button>
               ))}
         </div>
       </div>
 
       {loading ? (
-        <div className="h-[240px] w-full animate-pulse rounded-lg bg-surface-2" />
+        <div className="h-[320px] w-full animate-pulse rounded-lg bg-surface-2" />
       ) : view === "returns" ? (
-        <ChartContainer config={chartConfig} className="h-[240px] w-full">
+        <ChartContainer config={chartConfig} className="h-[320px] w-full">
           <BarChart data={barData} margin={{ left: 0, right: 0, top: 4, bottom: 0 }}>
             <CartesianGrid vertical={false} stroke="var(--hairline)" />
             <XAxis
@@ -385,7 +425,7 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
           </BarChart>
         </ChartContainer>
       ) : (
-        <ChartContainer config={chartConfig} className="h-[240px] w-full">
+        <ChartContainer config={chartConfig} className="h-[320px] w-full">
           <AreaChart data={lineData} margin={{ left: 0, right: 0, top: 4, bottom: 0 }}>
             <defs>
               <linearGradient id="fillValue" x1="0" y1="0" x2="0" y2="1">

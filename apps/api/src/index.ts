@@ -1,4 +1,12 @@
 import { createClient } from "@supabase/supabase-js";
+import {
+  buildEtfGeographyResearchPrompt,
+  countryFromIsin,
+  isFundLikeAsset,
+  normalizeEtfExtraction,
+  type NormalizedGeographyAllocation,
+  type GeographySource,
+} from "./geography";
 
 export interface Env {
   SUPABASE_URL: string;
@@ -6,6 +14,7 @@ export interface Env {
   SUPABASE_ANON_KEY: string;
   AGENT_RUNS_QUEUE: Queue<AgentRunQueueMessage>;
   SNAPSHOT_QUEUE: Queue<SnapshotQueueMessage>;
+  GEOGRAPHY_QUEUE: Queue<GeographyQueueMessage>;
   GROK_MAIN_API_KEY?: string;
   GROK_SUB_API_KEY?: string;
   GROK_NORMALIZATION_API_KEY?: string;
@@ -48,10 +57,32 @@ const YAHOO_HEADERS = {
   Accept: "application/json",
 };
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const res = await fetch(url, { headers: YAHOO_HEADERS });
+async function fetchJson<T>(url: string, options: { timeoutMs?: number } = {}): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId =
+    options.timeoutMs == null
+      ? null
+      : setTimeout(() => controller.abort("Request timed out"), options.timeoutMs);
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: YAHOO_HEADERS, signal: controller.signal });
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
   if (!res.ok) throw new Error(`Yahoo API error (${res.status})`);
   return (await res.json()) as T;
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 }
 
 async function searchYahooAssets(query: string): Promise<AssetSearchResult[]> {
@@ -233,9 +264,11 @@ interface YahooQuoteSummaryResponse {
     result?: Array<{
       summaryProfile?: {
         sector?: string;
+        country?: string;
       };
       assetProfile?: {
         sector?: string;
+        country?: string;
       };
       fundProfile?: {
         categoryName?: string;
@@ -266,7 +299,15 @@ interface SnapshotQueueMessage {
   portfolio_id: string;
 }
 
-type WorkerQueueMessage = AgentRunQueueMessage | SnapshotQueueMessage;
+interface GeographyQueueMessage {
+  type: "geography_research";
+  portfolio_id: string;
+  holding_id?: string;
+  holding_ids?: string[];
+  reason?: "holding_change" | "transaction_import" | "snapshot_rebuild" | "manual_retry";
+}
+
+type WorkerQueueMessage = AgentRunQueueMessage | SnapshotQueueMessage | GeographyQueueMessage;
 
 type TransactionSide = "BUY" | "SELL" | "DEP" | "WD" | "DIV" | "FEE";
 
@@ -396,6 +437,17 @@ interface NewsSearchResult {
   provider: "xai_web_search" | "google_rss_fallback";
   recencyDays: number;
   totalRetrieved: number;
+}
+
+interface HoldingGeographyRow {
+  id: string;
+  ticker: string;
+  name: string;
+  isin: string | null;
+  asset_type: string | null;
+  quantity: number;
+  purchase_price: number;
+  fees: number;
 }
 
 interface GuardrailState {
@@ -717,6 +769,710 @@ async function getSectorsForSymbols(symbols: string[]): Promise<Record<string, s
   return Object.fromEntries(entries);
 }
 
+async function researchEtfGeography(
+  env: Env,
+  holding: HoldingGeographyRow,
+): Promise<{
+  allocations: NormalizedGeographyAllocation[];
+  source: GeographySource;
+  confidence: number;
+  evidence: Record<string, unknown>;
+}> {
+  if (!env.GROK_SUB_API_KEY) {
+    throw new Error("Missing GROK_SUB_API_KEY");
+  }
+
+  const raw = await withTimeout(
+    invokeGrokWebGeographyResearch(env, holding),
+    60_000,
+    `ETF geography web research for ${holding.ticker}`,
+  );
+  const normalized = normalizeEtfExtraction(extractJsonObject(raw.outputText));
+  return {
+    allocations: normalized.allocations,
+    source: normalized.allocations.length > 0 ? "llm_web" : "unknown",
+    confidence: normalized.confidence,
+    evidence: {
+      ...normalized.evidence,
+      responseId: raw.responseId,
+      webSearchModel: env.GROK_WEB_SEARCH_MODEL || "grok-4-1-fast-reasoning",
+      citations: raw.citations,
+    },
+  };
+}
+
+async function invokeGrokWebGeographyResearch(
+  env: Env,
+  holding: HoldingGeographyRow,
+): Promise<{ outputText: string; responseId: string | null; citations: unknown[] }> {
+  const prompt = buildEtfGeographyResearchPrompt({
+    ticker: holding.ticker,
+    name: holding.name,
+    isin: holding.isin,
+    assetType: holding.asset_type,
+  });
+  const body = {
+    model: env.GROK_WEB_SEARCH_MODEL || "grok-4-1-fast-reasoning",
+    input: [
+      {
+        role: "system",
+        content: [
+          {
+            type: "input_text",
+            text: "You are a careful ETF geography research agent. Use web search to find actual country allocation. Return strict JSON only.",
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [{ type: "input_text", text: prompt }],
+      },
+    ],
+    tools: [{ type: "web_search" }],
+  };
+  const res = await fetch(`${getGrokBaseUrl(env)}/responses`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.GROK_SUB_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`ETF geography web research failed (${res.status}): ${text.slice(0, 400)}`);
+  }
+  const raw = (await res.json()) as Record<string, unknown>;
+  const outputText = outputTextFromResponse(raw);
+  if (!outputText) throw new Error("ETF geography web research returned no output text");
+  return {
+    outputText,
+    responseId: typeof raw.id === "string" ? raw.id : null,
+    citations: Array.isArray(raw.citations) ? raw.citations : [],
+  };
+}
+
+function resolveFastHoldingGeography(
+  holding: HoldingGeographyRow,
+): {
+  allocations: NormalizedGeographyAllocation[];
+  source: GeographySource;
+  confidence: number;
+  evidence: Record<string, unknown>;
+  preservesCachedResearch: boolean;
+} {
+  if (isFundLikeAsset(holding.asset_type, holding.name, holding.ticker)) {
+    return {
+      allocations: [],
+      source: "unknown",
+      confidence: 0,
+      evidence: { reason: "ETF/fund research is not run during fast refresh" },
+      preservesCachedResearch: true,
+    };
+  }
+
+  const fromIsin = countryFromIsin(holding.isin);
+  if (!fromIsin) {
+    return {
+      allocations: [],
+      source: "unknown",
+      confidence: 0,
+      evidence: { reason: "No country match from ISIN prefix", isin: holding.isin },
+      preservesCachedResearch: false,
+    };
+  }
+
+  return {
+    allocations: [{ countryCode: fromIsin.code, countryName: fromIsin.name, weightPct: 100 }],
+    source: "isin",
+    confidence: 0.95,
+    evidence: { isin: holding.isin },
+    preservesCachedResearch: false,
+  };
+}
+
+async function recomputePortfolioGeography(env: Env, portfolioId: string): Promise<{
+  checked: number;
+  resolved: number;
+  unresolved: number;
+  pendingResearch: number;
+}> {
+  const client = db(env);
+  const { data, error } = await client
+    .from("holdings")
+    .select("id,ticker,name,isin,asset_type,quantity,purchase_price,fees")
+    .eq("portfolio_id", portfolioId);
+  if (error) throw new Error(`geography holdings lookup failed: ${error.message}`);
+
+  const holdings = (data ?? []).map((row) => ({
+    id: String(row.id),
+    ticker: String(row.ticker).toUpperCase(),
+    name: String(row.name ?? row.ticker),
+    isin: row.isin == null ? null : String(row.isin).toUpperCase(),
+    asset_type: row.asset_type == null ? null : String(row.asset_type),
+    quantity: Number(row.quantity ?? 0),
+    purchase_price: Number(row.purchase_price ?? 0),
+    fees: Number(row.fees ?? 0),
+  }));
+
+  let resolved = 0;
+  let pendingResearch = 0;
+  const staleHoldingIds: string[] = [];
+  const allocationRows: Array<{
+    holding_id: string;
+    portfolio_id: string;
+    country_code: string;
+    country_name: string;
+    weight_pct: number;
+    source: GeographySource;
+    confidence: number;
+    evidence: Record<string, unknown>;
+  }> = [];
+
+  for (const holding of holdings) {
+    const result = resolveFastHoldingGeography(holding);
+    const primary = result.allocations[0] ?? null;
+    if (result.allocations.length > 0) resolved += 1;
+
+    if (result.preservesCachedResearch) {
+      pendingResearch += 1;
+      continue;
+    }
+
+    staleHoldingIds.push(holding.id);
+
+    await client
+      .from("holdings")
+      .update({
+        country_code: primary?.countryCode ?? null,
+        country_name: primary?.countryName ?? null,
+        geography_source: result.source,
+        geography_confidence: result.confidence,
+        geography_checked_at: new Date().toISOString(),
+      })
+      .eq("id", holding.id);
+
+    allocationRows.push(
+      ...result.allocations.map((allocation) => ({
+        holding_id: holding.id,
+        portfolio_id: portfolioId,
+        country_code: allocation.countryCode,
+        country_name: allocation.countryName,
+        weight_pct: allocation.weightPct,
+        source: result.source,
+        confidence: result.confidence,
+        evidence: result.evidence,
+      })),
+    );
+  }
+
+  if (staleHoldingIds.length > 0) {
+    await client.from("holding_geography_allocations").delete().in("holding_id", staleHoldingIds);
+  }
+  if (allocationRows.length > 0) {
+    const { error: insertError } = await client.from("holding_geography_allocations").insert(allocationRows);
+    if (insertError) throw new Error(`geography allocation insert failed: ${insertError.message}`);
+  }
+
+  return {
+    checked: holdings.length,
+    resolved,
+    unresolved: holdings.length - resolved,
+    pendingResearch,
+  };
+}
+
+async function pendingFundLikeHoldingIds(env: Env, portfolioId: string): Promise<string[]> {
+  const client = db(env);
+  const { data, error } = await client
+    .from("holdings")
+    .select("id,ticker,name,asset_type")
+    .eq("portfolio_id", portfolioId);
+  if (error) throw new Error(`pending geography holdings lookup failed: ${error.message}`);
+
+  const fundHoldings = (data ?? [])
+    .map((row) => ({
+      id: String(row.id),
+      ticker: String(row.ticker ?? ""),
+      name: String(row.name ?? row.ticker ?? ""),
+      asset_type: row.asset_type == null ? null : String(row.asset_type),
+    }))
+    .filter((holding) => isFundLikeAsset(holding.asset_type, holding.name, holding.ticker));
+  if (fundHoldings.length === 0) return [];
+
+  const holdingIds = fundHoldings.map((holding) => holding.id);
+  const { data: allocations, error: allocationsError } = await client
+    .from("holding_geography_allocations")
+    .select("holding_id")
+    .in("holding_id", holdingIds);
+  if (allocationsError) throw new Error(`pending geography allocations lookup failed: ${allocationsError.message}`);
+
+  const coveredHoldingIds = new Set((allocations ?? []).map((allocation) => String(allocation.holding_id)));
+  return fundHoldings
+    .filter((holding) => !coveredHoldingIds.has(holding.id))
+    .map((holding) => holding.id);
+}
+
+async function enqueuePendingGeographyResearch(
+  env: Env,
+  portfolioId: string,
+  reason: GeographyQueueMessage["reason"],
+): Promise<{ queued: boolean; pendingResearchCount: number; holdingIds: string[] }> {
+  const client = db(env);
+  const holdingIds = await pendingFundLikeHoldingIds(env, portfolioId);
+  if (holdingIds.length === 0) {
+    return { queued: false, pendingResearchCount: 0, holdingIds };
+  }
+
+  const { data: existingJobs, error: existingJobsError } = await client
+    .from("geography_research_jobs")
+    .select("holding_id,status")
+    .in("holding_id", holdingIds);
+  if (existingJobsError) throw new Error(`geography jobs lookup failed: ${existingJobsError.message}`);
+
+  const activeHoldingIds = new Set(
+    (existingJobs ?? [])
+      .filter((job) => job.status === "queued" || job.status === "running")
+      .map((job) => String(job.holding_id)),
+  );
+  const holdingIdsToQueue = holdingIds.filter((holdingId) => !activeHoldingIds.has(holdingId));
+  if (holdingIdsToQueue.length === 0) {
+    return { queued: true, pendingResearchCount: holdingIds.length, holdingIds };
+  }
+
+  if (!env.GEOGRAPHY_QUEUE) {
+    console.warn(`GEOGRAPHY_QUEUE binding missing; ${holdingIdsToQueue.length} geography research jobs not queued`);
+    return { queued: false, pendingResearchCount: holdingIds.length, holdingIds };
+  }
+
+  const now = new Date().toISOString();
+  const { error: upsertError } = await client.from("geography_research_jobs").upsert(
+    holdingIdsToQueue.map((holdingId) => ({
+      holding_id: holdingId,
+      portfolio_id: portfolioId,
+      status: "queued",
+      reason,
+      last_error: null,
+      started_at: null,
+      finished_at: null,
+      updated_at: now,
+    })),
+    { onConflict: "holding_id" },
+  );
+  if (upsertError) throw new Error(`geography job enqueue failed: ${upsertError.message}`);
+
+  await Promise.all(
+    holdingIdsToQueue.map((holdingId) =>
+      env.GEOGRAPHY_QUEUE.send({
+        type: "geography_research",
+        portfolio_id: portfolioId,
+        holding_id: holdingId,
+        reason,
+      }),
+    ),
+  );
+  return { queued: true, pendingResearchCount: holdingIds.length, holdingIds };
+}
+
+async function syncAndEnqueueGeography(
+  env: Env,
+  portfolioId: string,
+  reason: GeographyQueueMessage["reason"],
+): Promise<{
+  checked: number;
+  resolved: number;
+  unresolved: number;
+  pendingResearch: number;
+  researchQueued: boolean;
+  queuedHoldingIds: string[];
+}> {
+  const result = await recomputePortfolioGeography(env, portfolioId);
+  const queued = await enqueuePendingGeographyResearch(env, portfolioId, reason);
+  return {
+    ...result,
+    pendingResearch: queued.pendingResearchCount,
+    researchQueued: queued.queued,
+    queuedHoldingIds: queued.holdingIds,
+  };
+}
+
+async function markGeographyJobRunning(
+  client: ReturnType<typeof db>,
+  input: { portfolioId: string; holdingId: string; reason?: GeographyQueueMessage["reason"] },
+): Promise<void> {
+  const { data: existingJob, error: existingJobError } = await client
+    .from("geography_research_jobs")
+    .select("attempts")
+    .eq("holding_id", input.holdingId)
+    .maybeSingle();
+  if (existingJobError) throw new Error(`geography job lookup failed: ${existingJobError.message}`);
+
+  const now = new Date().toISOString();
+  const { error } = await client.from("geography_research_jobs").upsert(
+    {
+      holding_id: input.holdingId,
+      portfolio_id: input.portfolioId,
+      status: "running",
+      reason: input.reason ?? null,
+      attempts: Number(existingJob?.attempts ?? 0) + 1,
+      last_error: null,
+      started_at: now,
+      finished_at: null,
+      updated_at: now,
+    },
+    { onConflict: "holding_id" },
+  );
+  if (error) throw new Error(`geography job running update failed: ${error.message}`);
+}
+
+async function markGeographyJobCompleted(
+  client: ReturnType<typeof db>,
+  holdingId: string,
+  options: { lastError?: string | null } = {},
+): Promise<void> {
+  const now = new Date().toISOString();
+  const { error } = await client
+    .from("geography_research_jobs")
+    .update({
+      status: "completed",
+      last_error: options.lastError ?? null,
+      finished_at: now,
+      updated_at: now,
+    })
+    .eq("holding_id", holdingId);
+  if (error) throw new Error(`geography job completion update failed: ${error.message}`);
+}
+
+async function markGeographyJobsFailed(
+  env: Env,
+  portfolioId: string,
+  holdingIds: string[],
+  error: unknown,
+): Promise<void> {
+  if (holdingIds.length === 0) return;
+  const now = new Date().toISOString();
+  const message = error instanceof Error ? error.message : "Geography research failed";
+  const { error: updateError } = await db(env)
+    .from("geography_research_jobs")
+    .update({
+      status: "failed",
+      last_error: message,
+      finished_at: now,
+      updated_at: now,
+    })
+    .eq("portfolio_id", portfolioId)
+    .in("holding_id", holdingIds);
+  if (updateError) console.error("geography job failure update failed", updateError);
+}
+
+function completedUnknownGeographyReason(result: {
+  evidence: Record<string, unknown>;
+  confidence: number;
+}): string {
+  const diagnostics = result.evidence.normalizationDiagnostics as
+    | {
+        reason?: unknown;
+        invalidCountryLabels?: unknown;
+        acceptedWeightTotal?: unknown;
+        rejectedWeightTotal?: unknown;
+        confidence?: unknown;
+      }
+    | undefined;
+  const reason =
+    typeof diagnostics?.reason === "string" && diagnostics.reason.trim()
+      ? diagnostics.reason.trim()
+      : "No reliable country allocation returned by ETF research.";
+  const invalidCountryLabels = Array.isArray(diagnostics?.invalidCountryLabels)
+    ? diagnostics.invalidCountryLabels
+        .map((label) => String(label))
+        .filter(Boolean)
+        .slice(0, 5)
+    : [];
+  const acceptedWeightTotal = Number(diagnostics?.acceptedWeightTotal ?? NaN);
+  const rejectedWeightTotal = Number(diagnostics?.rejectedWeightTotal ?? NaN);
+  const notes = typeof result.evidence.notes === "string" ? result.evidence.notes.trim() : "";
+  const parts = [reason];
+  if (Number.isFinite(acceptedWeightTotal)) parts.push(`accepted ${acceptedWeightTotal.toFixed(1)}%`);
+  if (Number.isFinite(rejectedWeightTotal) && rejectedWeightTotal > 0) {
+    parts.push(`rejected ${rejectedWeightTotal.toFixed(1)}%`);
+  }
+  if (invalidCountryLabels.length > 0) parts.push(`invalid: ${invalidCountryLabels.join(", ")}`);
+  parts.push(`confidence ${result.confidence.toFixed(2)}`);
+  if (notes) parts.push(notes.slice(0, 180));
+  return parts.join(" · ");
+}
+
+async function researchPortfolioEtfGeography(
+  env: Env,
+  portfolioId: string,
+  options: { holdingIds?: string[]; onlyPending?: boolean; reason?: GeographyQueueMessage["reason"] } = {},
+): Promise<{ checked: number; resolved: number; unresolved: number }> {
+  const client = db(env);
+  const { data, error } = await client
+    .from("holdings")
+    .select("id,ticker,name,isin,asset_type,quantity,purchase_price,fees")
+    .eq("portfolio_id", portfolioId);
+  if (error) throw new Error(`ETF geography holdings lookup failed: ${error.message}`);
+
+  const requestedHoldingIds = new Set((options.holdingIds ?? []).map(String));
+  const holdings = (data ?? [])
+    .map((row) => ({
+      id: String(row.id),
+      ticker: String(row.ticker).toUpperCase(),
+      name: String(row.name ?? row.ticker),
+      isin: row.isin == null ? null : String(row.isin).toUpperCase(),
+      asset_type: row.asset_type == null ? null : String(row.asset_type),
+      quantity: Number(row.quantity ?? 0),
+      purchase_price: Number(row.purchase_price ?? 0),
+      fees: Number(row.fees ?? 0),
+    }))
+    .filter((holding) => isFundLikeAsset(holding.asset_type, holding.name, holding.ticker))
+    .filter((holding) => requestedHoldingIds.size === 0 || requestedHoldingIds.has(holding.id));
+
+  const holdingIds = holdings.map((holding) => holding.id);
+  const { data: allocationsData, error: allocationsError } =
+    holdingIds.length === 0
+      ? { data: [], error: null }
+      : await client
+          .from("holding_geography_allocations")
+          .select("holding_id,source,updated_at")
+          .in("holding_id", holdingIds);
+  if (allocationsError) throw new Error(`ETF geography allocations lookup failed: ${allocationsError.message}`);
+
+  const allocationsByHolding = new Map<string, Array<Record<string, unknown>>>();
+  for (const allocation of allocationsData ?? []) {
+    const holdingId = String(allocation.holding_id);
+    const current = allocationsByHolding.get(holdingId) ?? [];
+    current.push(allocation as Record<string, unknown>);
+    allocationsByHolding.set(holdingId, current);
+  }
+
+  if (options.onlyPending) {
+    const alreadyCoveredHoldings = holdings.filter(
+      (holding) => (allocationsByHolding.get(holding.id) ?? []).length > 0,
+    );
+    await Promise.all(alreadyCoveredHoldings.map((holding) => markGeographyJobCompleted(client, holding.id)));
+  }
+
+  const holdingsToResearch = holdings
+    .filter((holding) => !options.onlyPending || (allocationsByHolding.get(holding.id) ?? []).length === 0)
+    .sort((a, b) => {
+      const aPending = (allocationsByHolding.get(a.id) ?? []).length === 0 ? 0 : 1;
+      const bPending = (allocationsByHolding.get(b.id) ?? []).length === 0 ? 0 : 1;
+      if (aPending !== bPending) return aPending - bPending;
+      return a.ticker.localeCompare(b.ticker);
+    });
+
+  let resolved = 0;
+  const now = new Date().toISOString();
+  for (const holding of holdingsToResearch) {
+    await markGeographyJobRunning(client, {
+      portfolioId,
+      holdingId: holding.id,
+      reason: options.reason,
+    });
+    try {
+      const result = await withTimeout(
+        researchEtfGeography(env, holding),
+        75_000,
+        `ETF geography research for ${holding.ticker}`,
+      );
+      const primary = result.allocations[0] ?? null;
+      if (result.allocations.length > 0) resolved += 1;
+
+      await client
+        .from("holdings")
+        .update({
+          country_code: primary?.countryCode ?? null,
+          country_name: primary?.countryName ?? null,
+          geography_source: result.source,
+          geography_confidence: result.confidence,
+          geography_checked_at: now,
+        })
+        .eq("id", holding.id);
+      await client.from("holding_geography_allocations").delete().eq("holding_id", holding.id);
+
+      if (result.allocations.length > 0) {
+        const { error: insertError } = await client.from("holding_geography_allocations").insert(
+          result.allocations.map((allocation) => ({
+            holding_id: holding.id,
+            portfolio_id: portfolioId,
+            country_code: allocation.countryCode,
+            country_name: allocation.countryName,
+            weight_pct: allocation.weightPct,
+            source: result.source,
+            confidence: result.confidence,
+            evidence: result.evidence,
+          })),
+        );
+        if (insertError) throw new Error(`ETF geography allocation insert failed: ${insertError.message}`);
+      }
+      await markGeographyJobCompleted(client, holding.id, {
+        lastError: result.allocations.length === 0 ? completedUnknownGeographyReason(result) : null,
+      });
+    } catch (error) {
+      await markGeographyJobsFailed(env, portfolioId, [holding.id], error);
+      throw error;
+    }
+  }
+
+  return { checked: holdingsToResearch.length, resolved, unresolved: holdingsToResearch.length - resolved };
+}
+
+async function getPortfolioGeography(
+  env: Env,
+  portfolioId: string,
+  options: { useQuotes?: boolean } = {},
+): Promise<Record<string, unknown>> {
+  const client = db(env);
+  const { data: holdingsData, error: holdingsError } = await client
+    .from("holdings")
+    .select("id,ticker,name,asset_type,quantity,purchase_price,fees,geography_checked_at")
+    .eq("portfolio_id", portfolioId);
+  if (holdingsError) throw new Error(`geography holdings lookup failed: ${holdingsError.message}`);
+
+  const holdings = (holdingsData ?? []).map((row) => ({
+    id: String(row.id),
+    ticker: String(row.ticker).toUpperCase(),
+    name: String(row.name ?? row.ticker),
+    asset_type: row.asset_type == null ? null : String(row.asset_type),
+    quantity: Number(row.quantity ?? 0),
+    purchase_price: Number(row.purchase_price ?? 0),
+    fees: Number(row.fees ?? 0),
+    geography_checked_at: row.geography_checked_at == null ? null : String(row.geography_checked_at),
+  }));
+  const holdingIds = holdings.map((holding) => holding.id);
+  const { data: allocationsData, error: allocationsError } =
+    holdingIds.length === 0
+      ? { data: [], error: null }
+      : await client
+          .from("holding_geography_allocations")
+          .select("holding_id,country_code,country_name,weight_pct,source,confidence,updated_at")
+          .in("holding_id", holdingIds);
+  if (allocationsError) throw new Error(`geography allocations lookup failed: ${allocationsError.message}`);
+
+  const { data: jobsData, error: jobsError } =
+    holdingIds.length === 0
+      ? { data: [], error: null }
+      : await client
+          .from("geography_research_jobs")
+          .select("holding_id,status,last_error")
+          .in("holding_id", holdingIds);
+  if (jobsError) throw new Error(`geography jobs lookup failed: ${jobsError.message}`);
+
+  const quotesBySymbol =
+    options.useQuotes === false ? {} : await getQuotesResilient(holdings.map((holding) => holding.ticker));
+  const allocationsByHolding = new Map<string, Array<Record<string, unknown>>>();
+  for (const allocation of allocationsData ?? []) {
+    const holdingId = String(allocation.holding_id);
+    const current = allocationsByHolding.get(holdingId) ?? [];
+    current.push(allocation as Record<string, unknown>);
+    allocationsByHolding.set(holdingId, current);
+  }
+  const jobsByHolding = new Map<string, { status: string; lastError: string | null }>();
+  for (const job of jobsData ?? []) {
+    jobsByHolding.set(String(job.holding_id), {
+      status: String(job.status ?? ""),
+      lastError: job.last_error == null ? null : String(job.last_error),
+    });
+  }
+
+  const countryValues = new Map<
+    string,
+    { countryCode: string; countryName: string; value: number; source: string; confidence: number }
+  >();
+  let securitiesValue = 0;
+  let coveredValue = 0;
+  let unknownValue = 0;
+  let unknownHoldingCount = 0;
+  let pendingResearchCount = 0;
+  let queuedResearchCount = 0;
+  let runningResearchCount = 0;
+  let failedResearchCount = 0;
+  let completedUnknownResearchCount = 0;
+  const completedUnknownResearchReasons: string[] = [];
+  const failedResearchReasons: string[] = [];
+  let freshest: string | null = null;
+  let stalest: string | null = null;
+
+  for (const holding of holdings) {
+    const quote = quotesBySymbol[holding.ticker];
+    const price = quote?.currentPrice ?? holding.purchase_price;
+    const value = Math.max(0, price * holding.quantity + holding.fees);
+    securitiesValue += value;
+
+    const allocations = allocationsByHolding.get(holding.id) ?? [];
+    if (allocations.length === 0) {
+      unknownValue += value;
+      unknownHoldingCount += 1;
+      if (isFundLikeAsset(holding.asset_type, holding.name, holding.ticker)) {
+        const job = jobsByHolding.get(holding.id);
+        const jobStatus = job?.status;
+        if (jobStatus === "queued") queuedResearchCount += 1;
+        else if (jobStatus === "running") runningResearchCount += 1;
+        else if (jobStatus === "failed") {
+          failedResearchCount += 1;
+          if (job?.lastError) failedResearchReasons.push(job.lastError);
+        } else if (jobStatus === "completed") {
+          completedUnknownResearchCount += 1;
+          if (job?.lastError) completedUnknownResearchReasons.push(job.lastError);
+        } else pendingResearchCount += 1;
+      }
+      continue;
+    }
+
+    coveredValue += value;
+    for (const allocation of allocations) {
+      const code = String(allocation.country_code);
+      const weightPct = Number(allocation.weight_pct ?? 0);
+      const countryValue = value * (weightPct / 100);
+      const current = countryValues.get(code) ?? {
+        countryCode: code,
+        countryName: String(allocation.country_name ?? code),
+        value: 0,
+        source: String(allocation.source ?? "unknown"),
+        confidence: Number(allocation.confidence ?? 0),
+      };
+      current.value += countryValue;
+      current.confidence = Math.max(current.confidence, Number(allocation.confidence ?? 0));
+      if (current.source !== "llm_web") current.source = String(allocation.source ?? current.source);
+      countryValues.set(code, current);
+    }
+
+    if (holding.geography_checked_at) {
+      if (!freshest || holding.geography_checked_at > freshest) freshest = holding.geography_checked_at;
+      if (!stalest || holding.geography_checked_at < stalest) stalest = holding.geography_checked_at;
+    }
+  }
+
+  const safeTotal = securitiesValue || 1;
+  const countries = [...countryValues.values()]
+    .map((country) => ({
+      ...country,
+      percentage: Math.round((country.value / safeTotal) * 1000) / 10,
+    }))
+    .sort((a, b) => b.value - a.value);
+
+  return {
+    portfolioId,
+    totalValue: securitiesValue,
+    coveragePct: Math.round((coveredValue / safeTotal) * 1000) / 10,
+    unknownValue,
+    unknownPct: Math.round((unknownValue / safeTotal) * 1000) / 10,
+    unknownHoldingCount,
+    pendingResearchCount,
+    queuedResearchCount,
+    runningResearchCount,
+    failedResearchCount,
+    completedUnknownResearchCount,
+    completedUnknownResearchReasons: Array.from(new Set(completedUnknownResearchReasons)).slice(0, 3),
+    failedResearchReasons: Array.from(new Set(failedResearchReasons)).slice(0, 3),
+    checkedAt: freshest,
+    oldestCheckedAt: stalest,
+    countries,
+  };
+}
+
 async function getQuotesFromBatch(symbols: string[]): Promise<Record<string, YahooQuoteItem>> {
   if (symbols.length === 0) return {};
 
@@ -836,6 +1592,10 @@ async function getYtdChangePercent(symbol: string): Promise<number | null> {
 
 function isSnapshotQueueMessage(message: WorkerQueueMessage): message is SnapshotQueueMessage {
   return "type" in message && (message.type === "full_rebuild" || message.type === "daily_update");
+}
+
+function isGeographyQueueMessage(message: WorkerQueueMessage): message is GeographyQueueMessage {
+  return "type" in message && message.type === "geography_research";
 }
 
 async function fetchHistoricalPrices(
@@ -992,6 +1752,86 @@ async function loadPortfolioTransactions(env: Env, portfolioId: string): Promise
   }));
 }
 
+function stableGeographyKey(input: { isin?: string | null; ticker?: string | null }): string | null {
+  const isin = input.isin?.trim().toUpperCase();
+  if (isin) return `isin:${isin}`;
+  const ticker = input.ticker?.trim().toUpperCase();
+  if (ticker) return `ticker:${ticker}`;
+  return null;
+}
+
+async function snapshotHoldingGeography(
+  client: ReturnType<typeof db>,
+  portfolioId: string,
+): Promise<
+  Map<
+    string,
+    Array<{
+      country_code: string;
+      country_name: string;
+      weight_pct: number;
+      source: GeographySource;
+      confidence: number;
+      evidence: Record<string, unknown>;
+    }>
+  >
+> {
+  const { data: holdings, error: holdingsError } = await client
+    .from("holdings")
+    .select("id,ticker,isin")
+    .eq("portfolio_id", portfolioId);
+  if (holdingsError) throw new Error(`geography snapshot holdings lookup failed: ${holdingsError.message}`);
+
+  const holdingKeysById = new Map<string, string>();
+  for (const holding of holdings ?? []) {
+    const key = stableGeographyKey({
+      isin: holding.isin == null ? null : String(holding.isin),
+      ticker: holding.ticker == null ? null : String(holding.ticker),
+    });
+    if (key) holdingKeysById.set(String(holding.id), key);
+  }
+  const holdingIds = [...holdingKeysById.keys()];
+  if (holdingIds.length === 0) return new Map();
+
+  const { data: allocations, error: allocationsError } = await client
+    .from("holding_geography_allocations")
+    .select("holding_id,country_code,country_name,weight_pct,source,confidence,evidence")
+    .in("holding_id", holdingIds);
+  if (allocationsError) throw new Error(`geography snapshot allocations lookup failed: ${allocationsError.message}`);
+
+  const snapshot = new Map<
+    string,
+    Array<{
+      country_code: string;
+      country_name: string;
+      weight_pct: number;
+      source: GeographySource;
+      confidence: number;
+      evidence: Record<string, unknown>;
+    }>
+  >();
+
+  for (const allocation of allocations ?? []) {
+    const key = holdingKeysById.get(String(allocation.holding_id));
+    if (!key) continue;
+    const rows = snapshot.get(key) ?? [];
+    rows.push({
+      country_code: String(allocation.country_code),
+      country_name: String(allocation.country_name ?? allocation.country_code),
+      weight_pct: Number(allocation.weight_pct ?? 0),
+      source: String(allocation.source ?? "unknown") as GeographySource,
+      confidence: Number(allocation.confidence ?? 0),
+      evidence:
+        allocation.evidence && typeof allocation.evidence === "object"
+          ? (allocation.evidence as Record<string, unknown>)
+          : {},
+    });
+    snapshot.set(key, rows);
+  }
+
+  return snapshot;
+}
+
 async function rebuildCurrentHoldings(
   env: Env,
   portfolioId: string,
@@ -999,6 +1839,7 @@ async function rebuildCurrentHoldings(
 ): Promise<void> {
   const client = db(env);
   const txns = await loadPortfolioTransactions(env, portfolioId);
+  const cachedGeography = await snapshotHoldingGeography(client, portfolioId);
   const lots = new Map<
     string,
     {
@@ -1041,7 +1882,8 @@ async function rebuildCurrentHoldings(
     else lots.delete(key);
   }
 
-  await client.from("holdings").delete().eq("portfolio_id", portfolioId);
+  const { error: deleteError } = await client.from("holdings").delete().eq("portfolio_id", portfolioId);
+  if (deleteError) throw new Error(`holdings rebuild delete failed: ${deleteError.message}`);
   const holdingRows = [...lots.values()].map((lot) => ({
     portfolio_id: portfolioId,
     ticker: lot.ticker.toUpperCase(),
@@ -1053,7 +1895,31 @@ async function rebuildCurrentHoldings(
     fees: 0,
     asset_type: typeByTicker.get(lot.ticker.toUpperCase()) ?? "Other",
   }));
-  if (holdingRows.length > 0) await client.from("holdings").insert(holdingRows);
+  if (holdingRows.length > 0) {
+    const { data: insertedHoldings, error: insertError } = await client
+      .from("holdings")
+      .insert(holdingRows)
+      .select("id,ticker,isin");
+    if (insertError) throw new Error(`holdings rebuild insert failed: ${insertError.message}`);
+
+    const restoredRows = (insertedHoldings ?? []).flatMap((holding) => {
+      const key = stableGeographyKey({
+        isin: holding.isin == null ? null : String(holding.isin),
+        ticker: holding.ticker == null ? null : String(holding.ticker),
+      });
+      const cachedRows = key ? (cachedGeography.get(key) ?? []) : [];
+      return cachedRows.map((allocation) => ({
+        ...allocation,
+        holding_id: String(holding.id),
+        portfolio_id: portfolioId,
+      }));
+    });
+
+    if (restoredRows.length > 0) {
+      const { error: restoreError } = await client.from("holding_geography_allocations").insert(restoredRows);
+      if (restoreError) throw new Error(`geography restore failed: ${restoreError.message}`);
+    }
+  }
   await client.from("portfolios").update({ cash_value: cashValue }).eq("id", portfolioId);
 }
 
@@ -1597,17 +2463,7 @@ async function runWebSearchTool(
     throw new Error(`xAI web search failed (${res.status}): ${text.slice(0, 200)}`);
   }
   const raw = (await res.json()) as Record<string, unknown>;
-  const outputText =
-    typeof raw.output_text === "string"
-      ? raw.output_text
-      : Array.isArray(raw.output)
-        ? (raw.output as Array<Record<string, unknown>>)
-            .flatMap((item) =>
-              Array.isArray(item.content) ? (item.content as Array<Record<string, unknown>>) : [],
-            )
-            .map((content) => String(content.text ?? ""))
-            .join("\n")
-        : "";
+  const outputText = outputTextFromResponse(raw);
 
   let rows: Array<Record<string, unknown>> = [];
   try {
@@ -1649,6 +2505,15 @@ async function runWebSearchTool(
     recencyDays,
     totalRetrieved: rows.length || items.length,
   };
+}
+
+function outputTextFromResponse(raw: Record<string, unknown>): string {
+  if (typeof raw.output_text === "string") return raw.output_text;
+  if (!Array.isArray(raw.output)) return "";
+  return (raw.output as Array<Record<string, unknown>>)
+    .flatMap((item) => (Array.isArray(item.content) ? (item.content as Array<Record<string, unknown>>) : []))
+    .map((content) => String(content.text ?? ""))
+    .join("\n");
 }
 
 async function runNewsSearchTool(
@@ -2164,6 +3029,7 @@ export default {
           await db(env).from("portfolios").update({ primary_exchange: primaryExchange }).eq("id", portfolioId);
         }
         await rebuildCurrentHoldings(env, portfolioId);
+        await syncAndEnqueueGeography(env, portfolioId, "transaction_import");
         await env.SNAPSHOT_QUEUE.send({ type: "full_rebuild", portfolio_id: portfolioId });
         return json({ inserted: dbRows.length }, 201);
       }
@@ -2237,6 +3103,54 @@ export default {
       return json({ series });
     }
 
+    const geographyMatch = pathname.match(/^\/api\/portfolios\/([^/]+)\/geography$/);
+    if (geographyMatch) {
+      const portfolioId = geographyMatch[1];
+      const accessError = await requirePortfolioAccess(request, env, portfolioId);
+      if (accessError) return accessError;
+
+      try {
+        if (method === "GET") return json(await getPortfolioGeography(env, portfolioId));
+        if (method === "POST") {
+          const result = await recomputePortfolioGeography(env, portfolioId);
+          const geography = await getPortfolioGeography(env, portfolioId, { useQuotes: false });
+          return json({ ...result, geography });
+        }
+      } catch (error) {
+        return json({ error: error instanceof Error ? error.message : "Geography failed" }, 500);
+      }
+    }
+
+    const geographyEnqueueMatch = pathname.match(/^\/api\/portfolios\/([^/]+)\/geography\/enqueue$/);
+    if (geographyEnqueueMatch && method === "POST") {
+      const portfolioId = geographyEnqueueMatch[1];
+      const accessError = await requirePortfolioAccess(request, env, portfolioId);
+      if (accessError) return accessError;
+
+      try {
+        const result = await syncAndEnqueueGeography(env, portfolioId, "holding_change");
+        const geography = await getPortfolioGeography(env, portfolioId, { useQuotes: false });
+        return json({ ...result, geography });
+      } catch (error) {
+        return json({ error: error instanceof Error ? error.message : "Geography enqueue failed" }, 500);
+      }
+    }
+
+    const geographyResearchMatch = pathname.match(/^\/api\/portfolios\/([^/]+)\/geography\/research$/);
+    if (geographyResearchMatch && method === "POST") {
+      const portfolioId = geographyResearchMatch[1];
+      const accessError = await requirePortfolioAccess(request, env, portfolioId);
+      if (accessError) return accessError;
+
+      try {
+        const result = await researchPortfolioEtfGeography(env, portfolioId, { reason: "manual_retry" });
+        const geography = await getPortfolioGeography(env, portfolioId);
+        return json({ ...result, geography });
+      } catch (error) {
+        return json({ error: error instanceof Error ? error.message : "ETF geography research failed" }, 500);
+      }
+    }
+
     const transactionDeleteMatch = pathname.match(/^\/api\/portfolios\/([^/]+)\/transactions\/([^/]+)$/);
     if (transactionDeleteMatch && method === "DELETE") {
       const [, portfolioId, txnId] = transactionDeleteMatch;
@@ -2253,6 +3167,7 @@ export default {
         .eq("portfolio_id", portfolioId);
       if (error) return json({ error: error.message }, 500);
       await rebuildCurrentHoldings(env, portfolioId);
+      await syncAndEnqueueGeography(env, portfolioId, "transaction_import");
       await env.SNAPSHOT_QUEUE.send({ type: "full_rebuild", portfolio_id: portfolioId });
       return json({ deleted: txnId });
     }
@@ -2271,6 +3186,10 @@ export default {
         const body = await request.json();
         const { data, error } = await db(env).from("holdings").insert(body).select();
         if (error) return json({ error: error.message }, 500);
+        const portfolioIds = Array.from(
+          new Set((data ?? []).map((row) => String(row.portfolio_id ?? "")).filter(Boolean)),
+        );
+        await Promise.all(portfolioIds.map((portfolioId) => syncAndEnqueueGeography(env, portfolioId, "holding_change")));
         return json(data, 201);
       }
     }
@@ -2325,11 +3244,23 @@ export default {
         const body = await request.json();
         const { data, error } = await db(env).from("holdings").update(body).eq("id", id).select();
         if (error) return json({ error: error.message }, 500);
+        const portfolioIds = Array.from(
+          new Set((data ?? []).map((row) => String(row.portfolio_id ?? "")).filter(Boolean)),
+        );
+        await Promise.all(portfolioIds.map((portfolioId) => syncAndEnqueueGeography(env, portfolioId, "holding_change")));
         return json(data);
       }
       if (method === "DELETE") {
+        const { data: existingHolding } = await db(env)
+          .from("holdings")
+          .select("portfolio_id")
+          .eq("id", id)
+          .maybeSingle();
         const { error } = await db(env).from("holdings").delete().eq("id", id);
         if (error) return json({ error: error.message }, 500);
+        const portfolioId =
+          existingHolding?.portfolio_id == null ? null : String(existingHolding.portfolio_id);
+        if (portfolioId) await syncAndEnqueueGeography(env, portfolioId, "holding_change");
         return json({ deleted: true });
       }
     }
@@ -2734,12 +3665,32 @@ export default {
         try {
           if (message.body.type === "full_rebuild") {
             await recomputeSnapshots(env, message.body.portfolio_id);
+            await syncAndEnqueueGeography(env, message.body.portfolio_id, "snapshot_rebuild");
           } else {
             await appendTodaySnapshot(env, message.body.portfolio_id);
           }
           message.ack();
         } catch (error) {
           console.error(`snapshot queue failed for portfolio ${message.body.portfolio_id}`, error);
+          message.retry();
+        }
+        continue;
+      }
+
+      if (isGeographyQueueMessage(message.body)) {
+        const holdingIds = message.body.holding_id
+          ? [message.body.holding_id]
+          : (message.body.holding_ids ?? []);
+        try {
+          await researchPortfolioEtfGeography(env, message.body.portfolio_id, {
+            holdingIds,
+            onlyPending: true,
+            reason: message.body.reason,
+          });
+          message.ack();
+        } catch (error) {
+          await markGeographyJobsFailed(env, message.body.portfolio_id, holdingIds, error);
+          console.error(`geography queue failed for portfolio ${message.body.portfolio_id}`, error);
           message.retry();
         }
         continue;

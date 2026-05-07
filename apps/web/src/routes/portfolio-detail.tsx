@@ -3,6 +3,7 @@ import * as XLSX from "xlsx";
 import { DateRange } from "react-day-picker";
 import { format } from "date-fns";
 import { Link, useParams, useOutletContext } from "react-router-dom";
+import { motion, useReducedMotion } from "framer-motion";
 import {
   ArrowLeft,
   ArrowDown,
@@ -35,13 +36,13 @@ import { AddHoldingModal } from "@/components/add-holding-modal";
 import { ImportTransactionsModal } from "@/components/import-transactions-modal";
 import { PortfolioChart } from "@/components/portfolio-chart";
 import { PrimaryTabs } from "@/components/primary-tabs";
+import { OrbitRing } from "@/components/loading-ui/orbit-ring";
 import {
   TransactionDateRange,
   TransactionExportRow,
   TransactionHistoryTab,
 } from "@/components/transaction-history-tab";
-import { AllocationTreemap } from "@/components/portfolio/AllocationTreemap";
-import { AllocationStackedBar } from "@/components/portfolio/AllocationStackedBar";
+import { AllocationCard } from "@/components/portfolio/AllocationCard";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -219,12 +220,19 @@ interface LiveQuote {
 type ExportValue = string | number | null;
 type ExportRow = Record<string, ExportValue>;
 type DatePreset = "30D" | "90D" | "YTD" | "All";
+const PILL_TRANSITION = { type: "spring", stiffness: 420, damping: 34, mass: 0.7 };
 
 const API_BASE_URL =
   import.meta.env.VITE_API_URL ??
   (import.meta.env.PROD
     ? "https://binturong-api.nikita-osminine.workers.dev"
     : "http://localhost:8787");
+
+async function authHeaders() {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 const DEFAULT_ORDER: ColKey[] = ALL_COLUMNS.map((c) => c.key);
 
@@ -348,6 +356,8 @@ export default function PortfolioDetailPage() {
   const [cashSubmitting, setCashSubmitting] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"holdings" | "transactions">("holdings");
+  const shouldReduceMotion = useReducedMotion();
+  const pillTransition = shouldReduceMotion ? { duration: 0 } : PILL_TRANSITION;
   const [transactionSearch, setTransactionSearch] = useState("");
   const [transactionDateRange, setTransactionDateRange] = useState<TransactionDateRange>({
     from: null,
@@ -371,6 +381,19 @@ export default function PortfolioDetailPage() {
     else setPortfolio(pRes.data);
     if (!hRes.error) setHoldings(hRes.data || []);
     setLoading(false);
+  }, [portfolioId]);
+
+  const triggerGeographySync = useCallback(async () => {
+    if (!portfolioId) return;
+    try {
+      const headers = await authHeaders();
+      await fetch(`${API_BASE_URL}/api/portfolios/${portfolioId}/geography/enqueue`, {
+        method: "POST",
+        headers,
+      });
+    } catch {
+      // Geography sync is a background repair/enqueue step; holdings changes should not fail on it.
+    }
   }, [portfolioId]);
 
   useEffect(() => {
@@ -579,6 +602,7 @@ export default function PortfolioDetailPage() {
     if (error) toast.error("Failed to delete holding");
     else {
       toast.success("Holding removed");
+      void triggerGeographySync();
       load();
     }
   };
@@ -679,8 +703,9 @@ export default function PortfolioDetailPage() {
 
   if (loading)
     return (
-      <div className="flex h-64 items-center justify-center text-sm text-foreground-muted">
-        Loading…
+      <div className="flex h-64 items-center justify-center gap-2 text-sm text-foreground-muted">
+        <OrbitRing className="size-6" />
+        <span>Loading portfolio.</span>
       </div>
     );
 
@@ -697,7 +722,7 @@ export default function PortfolioDetailPage() {
       </div>
     );
 
-  const ROW_HEIGHT = 460;
+  const ROW_HEIGHT = 560;
 
   const KPIS = [
     { label: "Total value", value: fmt$(totalValue) },
@@ -793,30 +818,24 @@ export default function PortfolioDetailPage() {
             </div>
 
             {/* Chart card */}
-            <div className="min-h-0 flex-1 rounded-2xl border border-hairline bg-surface p-5">
-              <div className="mb-3 text-[11px] uppercase tracking-widest text-foreground-muted">
+            <div className="flex min-h-0 flex-1 flex-col rounded-2xl border border-hairline bg-surface p-5">
+              <div className="shrink-0 text-[11px] uppercase tracking-widest text-foreground-muted">
                 Portfolio value
               </div>
-              <PortfolioChart portfolioId={portfolioId} />
+              <div className="min-h-[24px] flex-1" />
+              <div className="shrink-0">
+                <PortfolioChart portfolioId={portfolioId} />
+              </div>
             </div>
           </div>
 
           {/* Right: allocation charts */}
-          <div className="flex flex-col gap-6" style={{ height: ROW_HEIGHT }}>
-            <div className="min-h-0 flex-[1.4]">
-              <AllocationTreemap
-                title="Allocation · By sector"
-                subtitle={`${sectorData.length} sectors`}
-                data={sectorData}
-              />
-            </div>
-            <div className="min-h-0 flex-1">
-              <AllocationStackedBar
-                title="Allocation · By asset type"
-                subtitle={`${assetTypeData.length} asset classes`}
-                data={assetTypeData}
-              />
-            </div>
+          <div className="min-h-0" style={{ height: ROW_HEIGHT }}>
+            <AllocationCard
+              portfolioId={portfolioId!}
+              sectorData={sectorData}
+              assetTypeData={assetTypeData}
+            />
           </div>
         </div>
 
@@ -830,16 +849,50 @@ export default function PortfolioDetailPage() {
               <TabsList className="h-9 rounded-full border border-hairline bg-surface-2 p-0.5">
                 <TabsTrigger
                   value="holdings"
-                  className="h-8 rounded-full px-4 text-[11px] uppercase tracking-[0.1em] data-[state=active]:bg-foreground data-[state=active]:text-background data-[state=inactive]:text-foreground-muted"
+                  className={`relative h-8 rounded-full px-4 text-[11px] uppercase tracking-[0.1em] transition-colors ${
+                    activeTab === "holdings"
+                      ? "text-background"
+                      : "text-foreground-muted hover:text-foreground"
+                  } isolate data-[state=active]:!bg-transparent data-[state=active]:!shadow-none`}
                 >
-                  Holdings
-                  <span className="ml-1.5 tabular-nums opacity-70">{rows.length}</span>
+                  {activeTab === "holdings" && (
+                    <motion.span
+                      layoutId="portfolio-history-tab-pill"
+                      className="pointer-events-none absolute inset-0 z-0 rounded-full bg-foreground"
+                      transition={pillTransition}
+                    />
+                  )}
+                  <span
+                    className={`relative z-10 ${
+                      activeTab === "holdings" ? "text-background" : "text-foreground-muted"
+                    }`}
+                  >
+                    Holdings
+                    <span className="ml-1.5 tabular-nums opacity-70">{rows.length}</span>
+                  </span>
                 </TabsTrigger>
                 <TabsTrigger
                   value="transactions"
-                  className="h-8 rounded-full px-4 text-[11px] uppercase tracking-[0.1em] data-[state=active]:bg-foreground data-[state=active]:text-background data-[state=inactive]:text-foreground-muted"
+                  className={`relative h-8 rounded-full px-4 text-[11px] uppercase tracking-[0.1em] transition-colors ${
+                    activeTab === "transactions"
+                      ? "text-background"
+                      : "text-foreground-muted hover:text-foreground"
+                  } isolate data-[state=active]:!bg-transparent data-[state=active]:!shadow-none`}
                 >
-                  Transactions
+                  {activeTab === "transactions" && (
+                    <motion.span
+                      layoutId="portfolio-history-tab-pill"
+                      className="pointer-events-none absolute inset-0 z-0 rounded-full bg-foreground"
+                      transition={pillTransition}
+                    />
+                  )}
+                  <span
+                    className={`relative z-10 ${
+                      activeTab === "transactions" ? "text-background" : "text-foreground-muted"
+                    }`}
+                  >
+                    Transactions
+                  </span>
                 </TabsTrigger>
               </TabsList>
 
@@ -1264,6 +1317,7 @@ export default function PortfolioDetailPage() {
           portfolioId={portfolioId!}
           onAdded={() => {
             setAddHoldingOpen(false);
+            void triggerGeographySync();
             load();
           }}
         />
@@ -1332,6 +1386,7 @@ export default function PortfolioDetailPage() {
             holding={editingHolding}
             onUpdated={() => {
               setEditingHolding(null);
+              void triggerGeographySync();
               load();
             }}
           />
@@ -1343,6 +1398,7 @@ export default function PortfolioDetailPage() {
           portfolioId={portfolioId!}
           onImported={() => {
             setActiveTab("transactions");
+            void triggerGeographySync();
             load();
           }}
         />
