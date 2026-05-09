@@ -141,6 +141,27 @@ export type Database = {
         };
         Relationships: [];
       };
+      benchmark_price_history: {
+        Row: {
+          close: number;
+          date: string;
+          fetched_at: string;
+          ticker: string;
+        };
+        Insert: {
+          close: number;
+          date: string;
+          fetched_at?: string;
+          ticker: string;
+        };
+        Update: {
+          close?: number;
+          date?: string;
+          fetched_at?: string;
+          ticker?: string;
+        };
+        Relationships: [];
+      };
       holdings: {
         Row: {
           asset_type: string | null;
@@ -417,6 +438,44 @@ export type Database = {
           yahoo_ticker?: string;
         };
         Relationships: [];
+      };
+      saved_benchmarks: {
+        Row: {
+          color: string;
+          created_at: string;
+          id: string;
+          name: string;
+          portfolio_id: string;
+          ticker: string;
+          weights: Json | null;
+        };
+        Insert: {
+          color: string;
+          created_at?: string;
+          id?: string;
+          name: string;
+          portfolio_id: string;
+          ticker: string;
+          weights?: Json | null;
+        };
+        Update: {
+          color?: string;
+          created_at?: string;
+          id?: string;
+          name?: string;
+          portfolio_id?: string;
+          ticker?: string;
+          weights?: Json | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "saved_benchmarks_portfolio_id_fkey";
+            columns: ["portfolio_id"];
+            isOneToOne: false;
+            referencedRelation: "portfolios";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       profiles: {
         Row: {
