@@ -28,7 +28,7 @@ export interface Env {
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
 
@@ -244,6 +244,45 @@ interface YahooChartResponse {
       };
     }>;
   };
+}
+
+interface BenchmarkPricePoint {
+  date: string;
+  close: number;
+}
+
+interface BenchmarkSuggestion {
+  name: string;
+  reason: string;
+}
+
+interface ResolvedBenchmarkSuggestion extends BenchmarkSuggestion {
+  ticker: string;
+}
+
+interface BenchmarkConcept extends BenchmarkSuggestion {
+  yahooSearchQueries: string[];
+  confidence: number;
+  needsWebSearch: boolean;
+}
+
+interface BenchmarkSuggestionDiagnostics {
+  concepts: number;
+  yahooCandidates: number;
+  webSearchFallbacks: number;
+  resolved: number;
+}
+
+interface BenchmarkHoldingPayload {
+  id: string;
+  ticker: string;
+  isin: string | null;
+  name: string;
+  weight: number;
+  sector: string;
+  geography: string;
+  assetType: string;
+  value: number;
 }
 
 interface YahooQuoteResponse {
@@ -1629,6 +1668,521 @@ async function fetchHistoricalPrices(
   return { prices: dateMap, type: instrumentType };
 }
 
+async function getBenchmarkPrices(
+  env: Env,
+  ticker: string,
+  fromDate: string,
+): Promise<BenchmarkPricePoint[]> {
+  const normalizedTicker = ticker.trim().toUpperCase();
+  if (!normalizedTicker) throw new Error("ticker is required");
+  const normalizedFromDate = normalizeDateString(fromDate);
+  const from = new Date(`${normalizedFromDate}T00:00:00.000Z`);
+  if (Number.isNaN(from.getTime())) throw new Error("from must be a valid date");
+
+  const client = db(env);
+  const today = toDateString(new Date());
+  const staleAfter = new Date();
+  staleAfter.setUTCDate(staleAfter.getUTCDate() - 1);
+  const staleAfterDate = toDateString(staleAfter);
+  const startCoverageGrace = new Date(from);
+  startCoverageGrace.setUTCDate(startCoverageGrace.getUTCDate() + 7);
+  const latestAcceptableFirstCachedDate = toDateString(startCoverageGrace);
+
+  const readCached = async () => {
+    const { data, error } = await client
+      .from("benchmark_price_history")
+      .select("date, close")
+      .eq("ticker", normalizedTicker)
+      .gte("date", normalizedFromDate)
+      .lte("date", today)
+      .order("date", { ascending: true });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((row) => ({
+      date: String(row.date),
+      close: Number(row.close),
+    }));
+  };
+
+  const cached = await readCached();
+  const earliestCachedDate = cached[0]?.date ?? null;
+  const latestCachedDate = cached.at(-1)?.date ?? null;
+  const cacheCoversRequestedStart =
+    earliestCachedDate != null && earliestCachedDate <= latestAcceptableFirstCachedDate;
+  if (cacheCoversRequestedStart && latestCachedDate && latestCachedDate >= staleAfterDate) return cached;
+
+  try {
+    const { prices } = await fetchHistoricalPrices(normalizedTicker, from);
+    const rows = [...prices.entries()].map(([date, close]) => ({
+      ticker: normalizedTicker,
+      date,
+      close,
+    }));
+    if (rows.length > 0) {
+      const { error } = await client.from("benchmark_price_history").upsert(rows, {
+        onConflict: "ticker,date",
+      });
+      if (error) throw new Error(error.message);
+    }
+    return await readCached();
+  } catch (error) {
+    if (cached.length > 0) return cached;
+    throw error;
+  }
+}
+
+function parseJsonArrayFromModelOutput(raw: string): unknown[] {
+  const stripped = raw
+    .trim()
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```\s*$/i, "")
+    .trim();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stripped);
+  } catch {
+    const start = stripped.indexOf("[");
+    const end = stripped.lastIndexOf("]");
+    if (start < 0 || end <= start) {
+      const objectStart = stripped.indexOf("{");
+      const objectEnd = stripped.lastIndexOf("}");
+      if (objectStart < 0 || objectEnd <= objectStart) return [];
+      try {
+        parsed = JSON.parse(stripped.slice(objectStart, objectEnd + 1));
+      } catch {
+        return [];
+      }
+    } else {
+      try {
+        parsed = JSON.parse(stripped.slice(start, end + 1));
+      } catch {
+        return [];
+      }
+    }
+  }
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && typeof parsed === "object") {
+    const row = parsed as Record<string, unknown>;
+    if (Array.isArray(row.benchmarks)) return row.benchmarks;
+    if (Array.isArray(row.suggestions)) return row.suggestions;
+    if (Array.isArray(row.concepts)) return row.concepts;
+  }
+  return [];
+}
+
+function parseModelBoolean(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return ["true", "yes", "1"].includes(value.trim().toLowerCase());
+  if (typeof value === "number") return value !== 0;
+  return false;
+}
+
+function parseBenchmarkConcepts(raw: string): BenchmarkConcept[] {
+  return parseJsonArrayFromModelOutput(raw)
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const row = item as Record<string, unknown>;
+      const name = String(row.name ?? "").trim();
+      const reason = String(row.reason ?? "").trim();
+      const rawQueries = row.yahooSearchQueries ?? row.yahoo_search_queries ?? row.queries;
+      const yahooSearchQueries = Array.isArray(rawQueries)
+        ? rawQueries.map((query) => String(query).trim()).filter(Boolean)
+        : [];
+      const rawConfidence = Number(row.confidence ?? 0.75);
+      const confidence =
+        Number.isFinite(rawConfidence) && rawConfidence > 1 ? rawConfidence / 100 : rawConfidence;
+      const needsWebSearch = parseModelBoolean(row.needsWebSearch ?? row.needs_web_search ?? false);
+      if (!name || !reason) return null;
+      return {
+        name,
+        reason,
+        yahooSearchQueries: Array.from(new Set([...yahooSearchQueries, name])).slice(0, 5),
+        confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0.75,
+        needsWebSearch,
+      };
+    })
+    .filter((item): item is BenchmarkConcept => item != null)
+    .slice(0, 3);
+}
+
+function parseBenchmarkFallbackQueries(raw: string): string[] {
+  const stripped = raw
+    .trim()
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```\s*$/i, "")
+    .trim();
+  try {
+    const parsed = JSON.parse(stripped) as unknown;
+    if (Array.isArray(parsed)) return parsed.map((item) => String(item).trim()).filter(Boolean);
+    if (parsed && typeof parsed === "object") {
+      const row = parsed as Record<string, unknown>;
+      const queries = row.yahooSearchQueries ?? row.yahoo_search_queries ?? row.queries;
+      if (Array.isArray(queries)) return queries.map((item) => String(item).trim()).filter(Boolean);
+    }
+  } catch {
+    const start = stripped.indexOf("{");
+    const end = stripped.lastIndexOf("}");
+    if (start < 0 || end <= start) return [];
+    return parseBenchmarkFallbackQueries(stripped.slice(start, end + 1));
+  }
+  return [];
+}
+
+function tokenizeBenchmarkText(value: string): string[] {
+  const stopWords = new Set(["the", "and", "for", "with", "index", "indices", "benchmark", "fund"]);
+  return value
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .split(/[^a-z0-9]+/i)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 1 && !stopWords.has(token));
+}
+
+function benchmarkAssetTypeScore(assetType: string): number {
+  const normalized = assetType.toUpperCase();
+  if (normalized.includes("INDEX")) return 90;
+  if (normalized.includes("ETF") || normalized.includes("ETP")) return 75;
+  if (normalized.includes("MUTUAL") || normalized.includes("FUND")) return 60;
+  if (normalized.includes("FUTURE")) return 35;
+  if (normalized.includes("EQUITY") || normalized.includes("STOCK")) return -80;
+  return 5;
+}
+
+function scoreBenchmarkCandidate(concept: BenchmarkConcept, candidate: AssetSearchResult, query: string): number {
+  const candidateText = `${candidate.name} ${candidate.ticker} ${candidate.assetType} ${candidate.exchange}`.toLowerCase();
+  const conceptName = concept.name.toLowerCase();
+  const conceptTokens = tokenizeBenchmarkText(`${concept.name} ${query}`);
+  const uniqueTokens = Array.from(new Set(conceptTokens));
+  let score = benchmarkAssetTypeScore(candidate.assetType);
+
+  if (candidateText.includes(conceptName)) score += 45;
+  if (conceptName.includes(candidate.name.toLowerCase()) && candidate.name.length > 4) score += 30;
+  if (candidate.ticker.startsWith("^")) score += 15;
+  if (candidateText.includes("index")) score += 10;
+  if (query.toLowerCase().includes(candidate.ticker.toLowerCase())) score += 35;
+  for (const token of uniqueTokens) {
+    if (candidateText.includes(token)) score += 8;
+  }
+  return score;
+}
+
+async function collectBenchmarkCandidates(
+  concept: BenchmarkConcept,
+): Promise<{ candidates: Array<AssetSearchResult & { score: number }>; checked: number }> {
+  const byTicker = new Map<string, AssetSearchResult & { score: number }>();
+  let checked = 0;
+  const queries = Array.from(
+    new Set([concept.name, ...concept.yahooSearchQueries].map((query) => query.trim()).filter(Boolean)),
+  ).slice(0, 6);
+
+  for (const query of queries) {
+    const results = await searchYahooAssets(query);
+    checked += results.length;
+    for (const result of results) {
+      const ticker = result.ticker.toUpperCase();
+      const score = scoreBenchmarkCandidate(concept, result, query);
+      const existing = byTicker.get(ticker);
+      if (!existing || score > existing.score) {
+        byTicker.set(ticker, { ...result, ticker, score });
+      }
+    }
+  }
+
+  const candidates = [...byTicker.values()]
+    .filter((candidate) => candidate.score >= 40)
+    .sort((a, b) => b.score - a.score);
+  return { candidates, checked };
+}
+
+async function getBenchmarkWebFallbackQueries(env: Env, concept: BenchmarkConcept): Promise<string[]> {
+  const apiKey = env.GROK_SUB_API_KEY ?? env.GROK_NORMALIZATION_API_KEY;
+  if (!apiKey) return [];
+  const body = {
+    model: env.GROK_WEB_SEARCH_MODEL || "grok-4-1-fast-reasoning",
+    input: [
+      {
+        role: "system",
+        content: [
+          {
+            type: "input_text",
+            text: [
+              "You resolve investment benchmark concepts to Yahoo Finance searchable names.",
+              "Use web search only to clarify the exact index, ETF, or fund name.",
+              "Return strict JSON only: {\"yahooSearchQueries\":[\"...\"]}.",
+            ].join(" "),
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: JSON.stringify({
+              name: concept.name,
+              reason: concept.reason,
+              existingYahooSearchQueries: concept.yahooSearchQueries,
+            }),
+          },
+        ],
+      },
+    ],
+    tools: [{ type: "web_search" }],
+  };
+  const res = await fetch(`${getGrokBaseUrl(env)}/responses`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) return [];
+  const raw = (await res.json()) as Record<string, unknown>;
+  return parseBenchmarkFallbackQueries(outputTextFromResponse(raw)).slice(0, 4);
+}
+
+async function resolveBenchmarkConcepts(
+  env: Env,
+  concepts: BenchmarkConcept[],
+): Promise<{ suggestions: ResolvedBenchmarkSuggestion[]; diagnostics: BenchmarkSuggestionDiagnostics }> {
+  const suggestions: ResolvedBenchmarkSuggestion[] = [];
+  const seenTickers = new Set<string>();
+  const diagnostics: BenchmarkSuggestionDiagnostics = {
+    concepts: concepts.length,
+    yahooCandidates: 0,
+    webSearchFallbacks: 0,
+    resolved: 0,
+  };
+
+  for (const concept of concepts) {
+    let { candidates, checked } = await collectBenchmarkCandidates(concept);
+    diagnostics.yahooCandidates += checked;
+    if (candidates.length === 0 && (concept.needsWebSearch || concept.confidence < 0.65)) {
+      diagnostics.webSearchFallbacks += 1;
+      const fallbackQueries = await getBenchmarkWebFallbackQueries(env, concept).catch(() => []);
+      if (fallbackQueries.length > 0) {
+        const fallbackConcept = {
+          ...concept,
+          yahooSearchQueries: Array.from(new Set([...concept.yahooSearchQueries, ...fallbackQueries])),
+        };
+        const fallbackResult = await collectBenchmarkCandidates(fallbackConcept);
+        candidates = fallbackResult.candidates;
+        diagnostics.yahooCandidates += fallbackResult.checked;
+      }
+    }
+
+    const match = candidates.find((candidate) => !seenTickers.has(candidate.ticker));
+    if (!match) continue;
+    seenTickers.add(match.ticker);
+    suggestions.push({
+      name: match.name || concept.name,
+      ticker: match.ticker,
+      reason: concept.reason,
+    });
+    if (suggestions.length >= 3) break;
+  }
+
+  diagnostics.resolved = suggestions.length;
+  return { suggestions, diagnostics };
+}
+
+async function buildBenchmarkSuggestionHoldingsPayload(
+  env: Env,
+  portfolioId: string,
+): Promise<BenchmarkHoldingPayload[]> {
+  const client = db(env);
+  const { data: holdings, error } = await client
+    .from("holdings")
+    .select("id,ticker,name,isin,asset_type,quantity,purchase_price,country_name")
+    .eq("portfolio_id", portfolioId);
+  if (error) throw new Error(error.message);
+
+  const rows = (holdings ?? []).map((row) => ({
+    id: String(row.id),
+    ticker: String(row.ticker ?? "").toUpperCase(),
+    name: String(row.name ?? row.ticker ?? ""),
+    isin: row.isin == null ? null : String(row.isin),
+    assetType: row.asset_type == null ? null : String(row.asset_type),
+    quantity: Number(row.quantity ?? 0),
+    purchasePrice: Number(row.purchase_price ?? 0),
+    countryName: row.country_name == null ? null : String(row.country_name),
+  }));
+  if (rows.length === 0) return [];
+
+  const [sectorsBySymbol, quotesBySymbol, allocationsResult] = await Promise.all([
+    getSectorsForSymbols(rows.map((row) => row.ticker)).catch(() => ({} as Record<string, string>)),
+    getQuotesResilient(rows.map((row) => row.ticker)).catch(() => ({} as Record<string, YahooQuoteItem>)),
+    client
+      .from("holding_geography_allocations")
+      .select("holding_id,country_name,weight_pct")
+      .eq("portfolio_id", portfolioId),
+  ]);
+  if (allocationsResult.error) throw new Error(allocationsResult.error.message);
+
+  const allocationsByHolding = new Map<string, Array<{ countryName: string; weightPct: number }>>();
+  for (const allocation of allocationsResult.data ?? []) {
+    const holdingId = String(allocation.holding_id);
+    const current = allocationsByHolding.get(holdingId) ?? [];
+    current.push({
+      countryName: String(allocation.country_name),
+      weightPct: Number(allocation.weight_pct ?? 0),
+    });
+    allocationsByHolding.set(holdingId, current);
+  }
+
+  const enrichedRows = rows.map((row) => {
+    const quote = quotesBySymbol[row.ticker];
+    const price = quote?.currentPrice ?? row.purchasePrice;
+    return {
+      ...row,
+      value: Math.max(0, price * row.quantity),
+      assetType: normalizeYahooAssetType(quote?.assetType, row.assetType) ?? row.assetType ?? "Other",
+      sector: sectorsBySymbol[row.ticker] ?? row.assetType ?? "Other",
+    };
+  });
+  const securitiesValue = enrichedRows.reduce((sum, row) => sum + row.value, 0);
+  return enrichedRows.map((row) => {
+    const allocations = (allocationsByHolding.get(row.id) ?? [])
+      .sort((a, b) => b.weightPct - a.weightPct)
+      .slice(0, 3);
+    const isinCountry = countryFromIsin(row.isin);
+    const geography =
+      allocations.length > 0
+        ? allocations.map((allocation) => allocation.countryName).join(", ")
+        : row.countryName || isinCountry?.name || "Unknown";
+
+    return {
+      id: row.id,
+      ticker: row.ticker,
+      isin: row.isin,
+      name: row.name,
+      weight: securitiesValue > 0 ? Math.round((row.value / securitiesValue) * 10000) / 10000 : 0,
+      sector: row.sector,
+      geography,
+      assetType: row.assetType,
+      value: row.value,
+    };
+  });
+}
+
+function compactMoney(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "~$0";
+  if (value >= 1_000_000) return `~$${Math.round(value / 100_000) / 10}M`;
+  return `~$${Math.round(value).toLocaleString("en-US")}`;
+}
+
+function formatExposurePct(value: number): string {
+  if (!Number.isFinite(value)) return "0%";
+  const rounded = value >= 10 ? Math.round(value) : Math.round(value * 10) / 10;
+  return `${rounded}%`;
+}
+
+function aggregateWeights(entries: Array<{ label: string; value: number }>, totalValue: number) {
+  const byLabel = new Map<string, number>();
+  for (const entry of entries) {
+    if (!entry.label || entry.value <= 0) continue;
+    byLabel.set(entry.label, (byLabel.get(entry.label) ?? 0) + entry.value);
+  }
+  const safeTotal = totalValue || 1;
+  return [...byLabel.entries()]
+    .map(([label, value]) => ({
+      label,
+      weight: Math.round((value / safeTotal) * 1000) / 10,
+      value,
+    }))
+    .sort((a, b) => b.value - a.value);
+}
+
+function formatBreakdown(
+  entries: Array<{ label: string; weight: number; value: number }>,
+  options: { maxItems?: number } = {},
+): string {
+  if (entries.length === 0) return "None.";
+  const maxItems = options.maxItems ?? 6;
+  const visible = entries.slice(0, maxItems);
+  const remainder = entries.slice(maxItems).reduce((sum, entry) => sum + entry.weight, 0);
+  const parts = visible.map((entry) => `${entry.label} ${formatExposurePct(entry.weight)}`);
+  if (remainder >= 0.5) parts.push(`Other ${formatExposurePct(remainder)}`);
+  return `${parts.join(", ")}.`;
+}
+
+async function buildBenchmarkPortfolioSummary(
+  env: Env,
+  portfolioId: string,
+  holdings: BenchmarkHoldingPayload[],
+): Promise<{ summaryString: string; holdingsPromptPayload: Array<Record<string, unknown>> }> {
+  const client = db(env);
+  const { data: portfolio, error: portfolioError } = await client
+    .from("portfolios")
+    .select("cash_value")
+    .eq("id", portfolioId)
+    .single();
+  if (portfolioError) throw new Error(portfolioError.message);
+
+  const cashValue = Math.max(0, Number(portfolio?.cash_value ?? 0));
+  const securitiesValue = holdings.reduce((sum, holding) => sum + holding.value, 0);
+  const totalValue = securitiesValue + cashValue;
+  const sectorBreakdown = aggregateWeights(
+    holdings.map((holding) => ({ label: holding.sector || "Other", value: holding.value })),
+    securitiesValue,
+  );
+  const assetMixEntries = holdings.map((holding) => ({
+    label: holding.assetType || "Other",
+    value: holding.value,
+  }));
+  if (cashValue > 0) assetMixEntries.push({ label: "Cash", value: cashValue });
+  const assetMixBreakdown = aggregateWeights(assetMixEntries, totalValue);
+
+  const allocationsResult =
+    holdings.length === 0
+      ? { data: [], error: null }
+      : await client
+          .from("holding_geography_allocations")
+          .select("holding_id,country_name,weight_pct")
+          .in("holding_id", holdings.map((holding) => holding.id));
+  if (allocationsResult.error) throw new Error(allocationsResult.error.message);
+
+  const allocationsByHolding = new Map<string, Array<{ countryName: string; weightPct: number }>>();
+  for (const allocation of allocationsResult.data ?? []) {
+    const holdingId = String(allocation.holding_id);
+    const current = allocationsByHolding.get(holdingId) ?? [];
+    current.push({
+      countryName: String(allocation.country_name ?? "Unknown"),
+      weightPct: Number(allocation.weight_pct ?? 0),
+    });
+    allocationsByHolding.set(holdingId, current);
+  }
+
+  const geographyEntries: Array<{ label: string; value: number }> = [];
+  for (const holding of holdings) {
+    const allocations = allocationsByHolding.get(holding.id) ?? [];
+    if (allocations.length === 0) {
+      geographyEntries.push({ label: "Unknown", value: holding.value });
+      continue;
+    }
+    for (const allocation of allocations) {
+      geographyEntries.push({
+        label: allocation.countryName || "Unknown",
+        value: holding.value * (allocation.weightPct / 100),
+      });
+    }
+  }
+  const geographyBreakdown = aggregateWeights(geographyEntries, securitiesValue);
+  const holdingsPromptPayload = holdings.map(({ id: _id, value: _value, ...holding }) => holding);
+
+  return {
+    summaryString: [
+      `Portfolio summary: ${holdings.length} holdings, ${compactMoney(totalValue)} total value.`,
+      `Sector exposure: ${formatBreakdown(sectorBreakdown)}`,
+      `Geographic exposure: ${formatBreakdown(geographyBreakdown)}`,
+      `Asset mix: ${formatBreakdown(assetMixBreakdown)}`,
+    ].join("\n"),
+    holdingsPromptPayload,
+  };
+}
+
 async function getAssetTypesFromBatch(symbols: string[]): Promise<Map<string, string>> {
   if (symbols.length === 0) return new Map();
 
@@ -2834,6 +3388,83 @@ export default {
       return json({ status: "ok", supabase, timestamp: new Date().toISOString() });
     }
 
+    if (method === "GET" && pathname === "/api/benchmarks/search") {
+      const q = (url.searchParams.get("q") || "").trim();
+      if (!q) return json([]);
+      try {
+        const results = await searchYahooAssets(q);
+        return json(results.map((result) => ({ name: result.name, ticker: result.ticker })));
+      } catch (error) {
+        return json({ error: error instanceof Error ? error.message : "Benchmark search failed" }, 500);
+      }
+    }
+
+    if (method === "POST" && pathname === "/api/benchmarks/suggest") {
+      const body = (await request.json().catch(() => ({}))) as { portfolioId?: string };
+      const portfolioId = String(body.portfolioId ?? "").trim();
+      if (!portfolioId) return json({ error: "portfolioId is required" }, 400);
+      const accessError = await requirePortfolioAccess(request, env, portfolioId);
+      if (accessError) return accessError;
+      if (!env.GROK_NORMALIZATION_API_KEY) {
+        return json({ error: "Server misconfiguration: GROK_NORMALIZATION_API_KEY is missing" }, 500);
+      }
+
+      try {
+        const holdingsPayload = await buildBenchmarkSuggestionHoldingsPayload(env, portfolioId);
+        if (holdingsPayload.length === 0) return json([]);
+        const { summaryString, holdingsPromptPayload } = await buildBenchmarkPortfolioSummary(
+          env,
+          portfolioId,
+          holdingsPayload,
+        );
+        const systemPrompt = [
+          "You are a portfolio analyst choosing benchmark concepts for a portfolio.",
+          "Use your model knowledge first; do not assume web search is available.",
+          "Given holdings with ISINs, names, weights, sectors, and geographies, infer 1 to 3 appropriate benchmark concepts.",
+          "The frontend can only overlay instruments available through Yahoo Finance, so include precise Yahoo Finance search queries for each concept.",
+          "Use needsWebSearch=true only when the concept is uncertain or needs external clarification before it can be resolved to a Yahoo Finance index, ETF, or fund.",
+          "Return strict JSON only, no markdown, as an array of objects with: name, reason, yahooSearchQueries, confidence, needsWebSearch.",
+        ].join(" ");
+        const userPrompt = `What benchmark can I use to compare my portfolio's performance to?
+
+${summaryString}
+
+Holdings detail:
+${JSON.stringify(holdingsPromptPayload, null, 2)}`;
+        const content = await invokeGrok(
+          env.GROK_NORMALIZATION_API_KEY,
+          "grok-4.20-0309-reasoning",
+          systemPrompt,
+          userPrompt,
+          env,
+        );
+        const concepts = parseBenchmarkConcepts(content);
+        const { suggestions, diagnostics } = await resolveBenchmarkConcepts(env, concepts);
+        console.log(
+          "benchmark_suggest_diagnostics",
+          JSON.stringify({
+            portfolioId,
+            ...diagnostics,
+          }),
+        );
+        return json(suggestions);
+      } catch (error) {
+        return json({ error: error instanceof Error ? error.message : "Benchmark suggestions failed" }, 500);
+      }
+    }
+
+    const benchmarkPricesMatch = pathname.match(/^\/api\/benchmarks\/([^/]+)\/prices$/);
+    if (benchmarkPricesMatch && method === "GET") {
+      const ticker = decodeURIComponent(benchmarkPricesMatch[1]);
+      const from = (url.searchParams.get("from") || "").trim();
+      if (!from) return json({ error: "from is required" }, 400);
+      try {
+        return json(await getBenchmarkPrices(env, ticker, from));
+      } catch (error) {
+        return json({ error: error instanceof Error ? error.message : "Benchmark price fetch failed" }, 500);
+      }
+    }
+
     // Portfolios
     if (pathname === "/api/portfolios") {
       if (method === "GET") {
@@ -2867,6 +3498,126 @@ export default {
         const { error } = await db(env).from("portfolios").delete().eq("id", id);
         if (error) return json({ error: error.message }, 500);
         return json({ deleted: true });
+      }
+    }
+
+    const savedBenchmarksMatch = pathname.match(/^\/api\/portfolios\/([^/]+)\/benchmarks\/saved$/);
+    if (savedBenchmarksMatch) {
+      const portfolioId = savedBenchmarksMatch[1];
+      const accessError = await requirePortfolioAccess(request, env, portfolioId);
+      if (accessError) return accessError;
+
+      if (method === "GET") {
+        const { data, error } = await db(env)
+          .from("saved_benchmarks")
+          .select("id, portfolio_id, name, ticker, weights, color, created_at")
+          .eq("portfolio_id", portfolioId)
+          .order("created_at", { ascending: true });
+        if (error) return json({ error: error.message }, 500);
+        return json({ benchmarks: data ?? [] });
+      }
+
+      if (method === "POST") {
+        const body = (await request.json().catch(() => ({}))) as {
+          name?: string;
+          ticker?: string;
+          weights?: unknown;
+          color?: string;
+        };
+        const name = String(body.name ?? "").trim();
+        const ticker = String(body.ticker ?? "").trim().toUpperCase();
+        if (!name || !ticker) return json({ error: "name and ticker are required" }, 400);
+
+        const palette = ["amber", "violet", "rose", "sky"];
+        const { data: existing, error: existingError } = await db(env)
+          .from("saved_benchmarks")
+          .select("color")
+          .eq("portfolio_id", portfolioId);
+        if (existingError) return json({ error: existingError.message }, 500);
+        const usedColors = new Set((existing ?? []).map((row) => String(row.color)));
+        const color =
+          String(body.color ?? "").trim() ||
+          palette.find((candidate) => !usedColors.has(candidate)) ||
+          palette[(existing?.length ?? 0) % palette.length];
+        const { data, error } = await db(env)
+          .from("saved_benchmarks")
+          .insert({
+            portfolio_id: portfolioId,
+            name,
+            ticker,
+            weights: body.weights ?? null,
+            color,
+          })
+          .select("id, portfolio_id, name, ticker, weights, color, created_at")
+          .single();
+        if (error) return json({ error: error.message }, 500);
+        return json(data, 201);
+      }
+    }
+
+    const savedBenchmarkMatch = pathname.match(/^\/api\/portfolios\/([^/]+)\/benchmarks\/saved\/([^/]+)$/);
+    if (savedBenchmarkMatch) {
+      const [, portfolioId, benchmarkId] = savedBenchmarkMatch;
+      const accessError = await requirePortfolioAccess(request, env, portfolioId);
+      if (accessError) return accessError;
+
+      if (method === "DELETE") {
+        const { error } = await db(env)
+          .from("saved_benchmarks")
+          .delete()
+          .eq("id", benchmarkId)
+          .eq("portfolio_id", portfolioId);
+        if (error) return json({ error: error.message }, 500);
+        return json({ deleted: benchmarkId });
+      }
+
+      if (method === "PATCH") {
+        const body = (await request.json().catch(() => ({}))) as { color?: string };
+        const color = String(body.color ?? "").trim();
+        const palette = new Set(["amber", "violet", "rose", "sky"]);
+        if (!palette.has(color)) return json({ error: "Invalid benchmark color" }, 400);
+
+        const { data: target, error: targetError } = await db(env)
+          .from("saved_benchmarks")
+          .select("id, color")
+          .eq("id", benchmarkId)
+          .eq("portfolio_id", portfolioId)
+          .single();
+        if (targetError || !target) return json({ error: "Saved benchmark not found" }, 404);
+
+        const { data: occupied, error: occupiedError } = await db(env)
+          .from("saved_benchmarks")
+          .select("id, color")
+          .eq("portfolio_id", portfolioId)
+          .eq("color", color)
+          .maybeSingle();
+        if (occupiedError) return json({ error: occupiedError.message }, 500);
+
+        const client = db(env);
+        const updatedIds = [benchmarkId];
+        if (occupied && String(occupied.id) !== benchmarkId) {
+          updatedIds.push(String(occupied.id));
+          const { error: swapError } = await client
+            .from("saved_benchmarks")
+            .update({ color: String(target.color) })
+            .eq("id", String(occupied.id))
+            .eq("portfolio_id", portfolioId);
+          if (swapError) return json({ error: swapError.message }, 500);
+        }
+
+        const { error: updateError } = await client
+          .from("saved_benchmarks")
+          .update({ color })
+          .eq("id", benchmarkId)
+          .eq("portfolio_id", portfolioId);
+        if (updateError) return json({ error: updateError.message }, 500);
+
+        const { data, error } = await client
+          .from("saved_benchmarks")
+          .select("id, portfolio_id, name, ticker, weights, color, created_at")
+          .in("id", updatedIds);
+        if (error) return json({ error: error.message }, 500);
+        return json({ benchmarks: data ?? [] });
       }
     }
 
