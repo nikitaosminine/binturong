@@ -822,7 +822,7 @@ export default function PortfolioDetailPage() {
               <div className="shrink-0 text-[11px] uppercase tracking-widest text-foreground-muted">
                 Portfolio value
               </div>
-              <div className="min-h-[24px] flex-1" />
+              <div className="h-1 shrink-0" />
               <div className="shrink-0">
                 <PortfolioChart portfolioId={portfolioId} />
               </div>
