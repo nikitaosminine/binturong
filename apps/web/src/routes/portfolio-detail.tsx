@@ -11,12 +11,13 @@ import {
   ArrowBigUp,
   CalendarDays,
   Columns3,
+  Download,
   FileJson,
   FileSpreadsheet,
   FileText,
+  Info,
   Keyboard,
   Minus,
-  MoreVertical,
   Pencil,
   Plus,
   Search,
@@ -38,7 +39,6 @@ import { PrimaryTabs } from "@/components/primary-tabs";
 import { OrbitRing } from "@/components/loading-ui/orbit-ring";
 import {
   TransactionDateRange,
-  TransactionExportRow,
   TransactionHistoryTab,
 } from "@/components/transaction-history-tab";
 import { AllocationCard } from "@/components/portfolio/AllocationCard";
@@ -48,14 +48,14 @@ import {
   ContextMenuCheckboxItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
-  DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -70,6 +70,21 @@ import { Calendar } from "@/components/ui/calendar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -214,12 +229,110 @@ interface LiveQuote {
   ytdChangePercent: number | null;
   sector?: string | null;
   assetType?: string | null;
+  lastPriceUpdatedAt?: string | null;
 }
 
 type ExportValue = string | number | null;
 type ExportRow = Record<string, ExportValue>;
 type DatePreset = "30D" | "90D" | "YTD" | "All";
-const PILL_TRANSITION = { type: "spring", stiffness: 420, damping: 34, mass: 0.7 };
+type ExportFormat = "xlsx" | "csv" | "json";
+type CsvExportScope = "portfolio" | "allocation" | "holdings" | "transactions";
+type ExportDatePreset = "all_time" | "ytd" | "last_12_months" | "last_quarter" | "custom";
+type ExportDateRange = TransactionDateRange;
+type ExportSheetSection = { title: string; rows: ExportRow[]; headers: string[] };
+type ExportSheetSpec = {
+  name: string;
+  rows: ExportRow[];
+  headers: string[];
+  sections?: ExportSheetSection[];
+};
+
+interface ChartSeries {
+  date: string;
+  total_value: number;
+  cash_balance: number;
+  securities_value: number;
+  simple_return_pct: number;
+  twr_pct: number;
+}
+
+interface BenchmarkDefinition {
+  id?: string;
+  name: string;
+  ticker: string;
+  color: string;
+  weights?: unknown;
+  created_at?: string;
+}
+
+interface BenchmarkPricePoint {
+  date: string;
+  close: number;
+}
+
+interface GeographyCountry {
+  countryCode?: string | null;
+  countryName?: string | null;
+  value?: number | null;
+  percentage?: number | null;
+  source?: string | null;
+  confidence?: number | null;
+}
+
+interface GeographyResponse {
+  coveragePct?: number | null;
+  unknownPct?: number | null;
+  unknownValue?: number | null;
+  unknownHoldingCount?: number | null;
+  checkedAt?: string | null;
+  oldestCheckedAt?: string | null;
+  countries?: GeographyCountry[];
+}
+
+interface TransactionApiRow {
+  date: string;
+  symbol: string;
+  isin: string | null;
+  yahoo_ticker: string | null;
+  side: string;
+  quantity: number | null;
+  net_amount: number | null;
+  commission: number;
+}
+
+interface ExportDataset {
+  portfolioRows: ExportRow[];
+  portfolioReturnRows: ExportRow[];
+  portfolioReturnHeaders: string[];
+  allocationRows: ExportRow[];
+  holdingsRows: ExportRow[];
+  transactionsRows: ExportRow[];
+  savedBenchmarkRows: ExportRow[];
+  jsonPayload: {
+    meta: {
+      exported_at: string;
+      portfolio_name: string;
+      account_type: string;
+      currency: string;
+      date_range: ExportDateRange;
+    };
+    portfolio: {
+      summary: ExportRow;
+      value_history: ExportRow[];
+    };
+    allocation: {
+      sectors: ExportRow[];
+      asset_types: ExportRow[];
+      geography: ExportRow[];
+    };
+    holdings: ExportRow[];
+    transactions: ExportRow[];
+    saved_benchmarks: ExportRow[];
+  };
+}
+
+const PILL_TRANSITION = { type: "spring" as const, stiffness: 420, damping: 34, mass: 0.7 };
+const ACTIVE_BENCHMARKS_STORAGE_PREFIX = "portfolio-chart:active-benchmarks";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_URL ??
@@ -227,7 +340,7 @@ const API_BASE_URL =
     ? "https://binturong-api.nikita-osminine.workers.dev"
     : "http://localhost:8787");
 
-async function authHeaders() {
+async function authHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -269,6 +382,59 @@ function getPresetRange(preset: DatePreset): TransactionDateRange {
   return { from: toIsoDate(addDays(today, preset === "30D" ? -30 : -90)), to: toIsoDate(today) };
 }
 
+function getExportDatePresetRange(preset: ExportDatePreset): ExportDateRange {
+  const today = new Date();
+  if (preset === "all_time" || preset === "custom") return { from: null, to: null };
+  if (preset === "ytd") return { from: `${today.getFullYear()}-01-01`, to: toIsoDate(today) };
+  if (preset === "last_12_months") {
+    const start = new Date(today);
+    start.setFullYear(start.getFullYear() - 1);
+    return { from: toIsoDate(start), to: toIsoDate(today) };
+  }
+
+  const currentQuarter = Math.floor(today.getMonth() / 3);
+  const startMonth = currentQuarter === 0 ? 9 : (currentQuarter - 1) * 3;
+  const year = currentQuarter === 0 ? today.getFullYear() - 1 : today.getFullYear();
+  const start = new Date(year, startMonth, 1);
+  const end = new Date(year, startMonth + 3, 0);
+  return { from: toIsoDate(start), to: toIsoDate(end) };
+}
+
+function getInitialExportPreset(
+  transactionLabel: string,
+  transactionRange: TransactionDateRange,
+): ExportDatePreset {
+  if (!transactionRange.from && !transactionRange.to) return "all_time";
+  if (transactionLabel === "YTD") return "ytd";
+  return "custom";
+}
+
+function slugifyPortfolioName(name: string | null | undefined) {
+  const slug = (name ?? "")
+    .trim()
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "portfolio";
+}
+
+function formatExportDate(date = new Date()) {
+  return toIsoDate(date);
+}
+
+function formatExportFilename(
+  portfolioName: string,
+  exportLabel: "export" | CsvExportScope,
+  extension: ExportFormat,
+) {
+  return `${slugifyPortfolioName(portfolioName)}_${exportLabel}_${formatExportDate()}.${extension}`;
+}
+
+function escapeCsvValue(value: ExportValue) {
+  const text = value == null ? "" : String(value);
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
 function downloadBlob(filename: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -280,29 +446,222 @@ function downloadBlob(filename: string, blob: Blob) {
   URL.revokeObjectURL(url);
 }
 
-function exportToCsv(filename: string, rows: ExportRow[]) {
-  const headers = Object.keys(rows[0] ?? {});
-  const escape = (value: ExportValue) => {
-    const text = value == null ? "" : String(value);
-    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-  };
+function exportToCsv(filename: string, rows: ExportRow[], headers: string[]) {
   const csv = [
     headers.join(","),
-    ...rows.map((row) => headers.map((key) => escape(row[key])).join(",")),
+    ...rows.map((row) => headers.map((key) => escapeCsvValue(row[key])).join(",")),
   ].join("\n");
   downloadBlob(filename, new Blob([csv], { type: "text/csv;charset=utf-8" }));
 }
 
-function exportToJson(filename: string, rows: ExportRow[]) {
-  downloadBlob(filename, new Blob([JSON.stringify(rows, null, 2)], { type: "application/json" }));
+function exportToJson(filename: string, payload: unknown) {
+  downloadBlob(
+    filename,
+    new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }),
+  );
 }
 
-function exportToXlsx(filename: string, rows: ExportRow[]) {
-  const worksheet = XLSX.utils.json_to_sheet(rows);
+function rowsToWorksheet(rows: ExportRow[], headers: string[], sections: ExportSheetSection[] = []) {
+  const sheetRows: ExportValue[][] = [
+    headers,
+    ...rows.map((row) => headers.map((key) => row[key] ?? "")),
+  ];
+
+  for (const section of sections) {
+    sheetRows.push([]);
+    sheetRows.push([section.title]);
+    sheetRows.push(section.headers);
+    sheetRows.push(...section.rows.map((row) => section.headers.map((key) => row[key] ?? "")));
+  }
+
+  return XLSX.utils.aoa_to_sheet(sheetRows);
+}
+
+function exportToXlsx(filename: string, sheets: ExportSheetSpec[]) {
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, "Export");
+  for (const sheet of sheets) {
+    XLSX.utils.book_append_sheet(
+      workbook,
+      rowsToWorksheet(sheet.rows, sheet.headers, sheet.sections),
+      sheet.name.slice(0, 31),
+    );
+  }
   XLSX.writeFile(workbook, filename);
 }
+
+function transactionToExportRow(transaction: TransactionApiRow): ExportRow {
+  return {
+    Date: transaction.date,
+    Symbol: transaction.symbol,
+    ISIN: transaction.isin ?? "",
+    Ticker: transaction.yahoo_ticker ?? "",
+    Side: transaction.side,
+    Qty: transaction.quantity ?? "",
+    "Net Amount": transaction.net_amount ?? "",
+    Commission: transaction.commission || "",
+  };
+}
+
+function isWithinDateRange(date: string, range: ExportDateRange) {
+  const matchesFrom = !range.from || date >= range.from;
+  const matchesTo = !range.to || date <= range.to;
+  return matchesFrom && matchesTo;
+}
+
+function activeBenchmarksStorageKey(portfolioId: string) {
+  return `${ACTIVE_BENCHMARKS_STORAGE_PREFIX}:${portfolioId}`;
+}
+
+function parseStoredActiveBenchmarks(value: string | null): BenchmarkDefinition[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const row = item as Record<string, unknown>;
+        const name = String(row.name ?? "").trim();
+        const ticker = String(row.ticker ?? "")
+          .trim()
+          .toUpperCase();
+        const color = String(row.color ?? "").trim();
+        if (!name || !ticker || !color) return null;
+        const benchmark: BenchmarkDefinition = { name, ticker, color };
+        if (typeof row.id === "string") benchmark.id = row.id;
+        if ("weights" in row) benchmark.weights = row.weights;
+        if (typeof row.created_at === "string") benchmark.created_at = row.created_at;
+        return benchmark;
+      })
+      .filter((item): item is BenchmarkDefinition => item != null)
+      .slice(0, 4);
+  } catch {
+    return [];
+  }
+}
+
+function loadStoredActiveBenchmarks(portfolioId: string): BenchmarkDefinition[] {
+  return parseStoredActiveBenchmarks(localStorage.getItem(activeBenchmarksStorageKey(portfolioId)));
+}
+
+function latestBenchmarkCloseOnOrBefore(prices: BenchmarkPricePoint[], date: string) {
+  let value: number | null = null;
+  for (const point of prices) {
+    if (point.date > date) break;
+    value = point.close;
+  }
+  return value;
+}
+
+function latestReturnOnOrBefore(
+  points: Array<{ date: string; value: number }>,
+  date: string,
+): number | null {
+  let value: number | null = null;
+  for (const point of points) {
+    if (point.date > date) break;
+    value = point.value;
+  }
+  return value;
+}
+
+function benchmarkColumnName(benchmark: BenchmarkDefinition) {
+  return `${benchmark.name} (${benchmark.ticker})`;
+}
+
+function benchmarkReturnColumnName(benchmark: BenchmarkDefinition) {
+  return `${benchmark.name} (${benchmark.ticker}) Return %`;
+}
+
+function getMonthLabel(monthKey: string) {
+  const [year, month] = monthKey.split("-").map(Number);
+  if (!year || !month) return monthKey;
+  return new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString("en-US", {
+    month: "short",
+    year: "2-digit",
+    timeZone: "UTC",
+  });
+}
+
+function computeMonthlyReturnValues(points: Array<{ date: string; value: number }>) {
+  const sorted = points
+    .filter((point) => point.date && Number.isFinite(point.value))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const grouped = new Map<string, Array<{ date: string; value: number }>>();
+  for (const point of sorted) {
+    const monthKey = point.date.slice(0, 7);
+    if (!grouped.has(monthKey)) grouped.set(monthKey, []);
+    grouped.get(monthKey)!.push(point);
+  }
+
+  return Array.from(grouped.entries()).map(([monthKey, monthPoints]) => {
+    const first = monthPoints[0];
+    const last = monthPoints[monthPoints.length - 1];
+    const startFactor = 1 + first.value / 100;
+    const endFactor = 1 + last.value / 100;
+    return {
+      period: getMonthLabel(monthKey),
+      value: startFactor > 0 ? Number((((endFactor / startFactor) - 1) * 100).toFixed(2)) : null,
+    };
+  });
+}
+
+function benchmarkPricesToReturnPoints(prices: BenchmarkPricePoint[]) {
+  const sorted = prices
+    .filter((point) => Number.isFinite(point.close) && point.close > 0)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const base = sorted[0]?.close;
+  if (!base) return [];
+  return sorted.map((point) => ({
+    date: point.date,
+    value: ((point.close / base) - 1) * 100,
+  }));
+}
+
+const PORTFOLIO_EXPORT_HEADERS = [
+  "Date",
+  "Total Value",
+  "Cash Balance",
+  "Securities Value",
+  "Simple Return %",
+  "TWR %",
+];
+const PORTFOLIO_RETURN_EXPORT_HEADERS = ["Period", "Portfolio Return %"];
+const ALLOCATION_EXPORT_HEADERS = [
+  "Category",
+  "Name",
+  "Weight %",
+  "Checked At",
+];
+const HOLDINGS_EXPORT_HEADERS = [
+  "Asset",
+  "Ticker",
+  "ISIN",
+  "Type",
+  "Qty",
+  "Current",
+  "Cost",
+  "Value",
+  "Gain/Loss",
+  "Weight %",
+  "Sector",
+  "1D %",
+  "YTD %",
+  "Take Count",
+  "Last Price",
+  "Last Price Update",
+];
+const SAVED_BENCHMARKS_EXPORT_HEADERS = ["Name", "Ticker", "Created At", "Active"];
+const TRANSACTION_EXPORT_HEADERS = [
+  "Date",
+  "Symbol",
+  "ISIN",
+  "Ticker",
+  "Side",
+  "Qty",
+  "Net Amount",
+  "Commission",
+];
 
 function PerfCell({ value, money }: { value: number; money?: boolean }) {
   const Icon = value > 0 ? ArrowUp : value < 0 ? ArrowDown : Minus;
@@ -366,7 +725,15 @@ export default function PortfolioDetailPage() {
   });
   const [transactionDateLabel, setTransactionDateLabel] = useState("Date range");
   const [transactionCalendarRange, setTransactionCalendarRange] = useState<DateRange | undefined>();
-  const [transactionExportRows, setTransactionExportRows] = useState<TransactionExportRow[]>([]);
+  const [exportSheetOpen, setExportSheetOpen] = useState(false);
+  const [exportFormat, setExportFormat] = useState<ExportFormat>("xlsx");
+  const [selectedCsvExportScopes, setSelectedCsvExportScopes] = useState<CsvExportScope[]>([
+    "portfolio",
+  ]);
+  const [exportDatePreset, setExportDatePreset] = useState<ExportDatePreset>("all_time");
+  const [exportDateRange, setExportDateRange] = useState<ExportDateRange>({ from: null, to: null });
+  const [exportSubmitting, setExportSubmitting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const columnModifierSelectRef = useRef(false);
 
   const load = useCallback(async () => {
@@ -532,35 +899,52 @@ export default function PortfolioDetailPage() {
   }, [holdings]);
 
   const visibleCols = colOrder.filter((k) => !hiddenCols.has(k));
-  const holdingsExportRows = useMemo<ExportRow[]>(() => {
+  const holdingsSnapshotRows = useMemo<ExportRow[]>(() => {
     return rows.map((row) => {
-      const values: Record<ColKey, ExportValue> = {
-        name: row.name,
-        assetType: row.assetType,
-        qty: row.qty,
-        cur: row.cur,
-        buy: row.buy,
-        total: row.total,
-        gl: row.gl,
-        weight: `${row.weight.toFixed(1)}%`,
-        sector: row.sector,
-        perf1D: `${row.perf1D.toFixed(2)}%`,
-        perfYTD: `${row.perfYTD.toFixed(2)}%`,
-        take: thesesForTicker(theses, row.ticker).length,
+      return {
+        Asset: row.name,
+        Ticker: row.ticker,
+        ISIN: row.isin ?? "",
+        Type: row.assetType,
+        Qty: row.qty,
+        Current: row.cur,
+        Cost: row.buy,
+        Value: row.total,
+        "Gain/Loss": row.gl,
+        "Weight %": Number(row.weight.toFixed(2)),
+        Sector: row.sector,
+        "1D %": Number(row.perf1D.toFixed(2)),
+        "YTD %": Number(row.perfYTD.toFixed(2)),
+        "Take Count": thesesForTicker(theses, row.ticker).length,
+        "Last Price": liveQuotes[row.ticker.toUpperCase()]?.currentPrice ?? null,
+        "Last Price Update": liveQuotes[row.ticker.toUpperCase()]?.lastPriceUpdatedAt ?? "",
       };
-      return visibleCols.reduce<ExportRow>((acc, key) => {
-        const column = ALL_COLUMNS.find((col) => col.key === key)!;
-        acc[column.label] = values[key];
-        return acc;
-      }, {});
     });
-  }, [rows, theses, visibleCols]);
+  }, [liveQuotes, rows, theses]);
 
-  const activeExportRows = activeTab === "holdings" ? holdingsExportRows : transactionExportRows;
-  const activeExportName =
-    activeTab === "holdings"
-      ? `${portfolio?.name ?? "portfolio"}-holdings`
-      : `${portfolio?.name ?? "portfolio"}-transactions`;
+  const sectorAllocationRows = useMemo<ExportRow[]>(() => {
+    return sectorData.map((item) => ({
+      Category: "Sector",
+      Name: item.name,
+      Value: item.value,
+      "Weight %": holdingsValue > 0 ? Number(((item.value / holdingsValue) * 100).toFixed(2)) : 0,
+    }));
+  }, [holdingsValue, sectorData]);
+
+  const assetTypeAllocationRows = useMemo<ExportRow[]>(() => {
+    return assetTypeData.map((item) => ({
+      Category: "Asset Type",
+      Name: item.name,
+      Value: item.value,
+      "Weight %": totalValue > 0 ? Number(((item.value / totalValue) * 100).toFixed(2)) : 0,
+    }));
+  }, [assetTypeData, totalValue]);
+
+  const allocationExportRows = useMemo<ExportRow[]>(
+    () => [...sectorAllocationRows, ...assetTypeAllocationRows],
+    [assetTypeAllocationRows, sectorAllocationRows],
+  );
+
   const hasTransactionDateFilter = transactionDateLabel !== "Date range";
 
   const handleSort = (key: string) => {
@@ -669,6 +1053,33 @@ export default function PortfolioDetailPage() {
     setTransactionCalendarRange(undefined);
   };
 
+  const openExportSheet = () => {
+    const nextPreset = getInitialExportPreset(transactionDateLabel, transactionDateRange);
+    setExportFormat("xlsx");
+    setSelectedCsvExportScopes(["portfolio"]);
+    setExportDatePreset(nextPreset);
+    setExportDateRange({ ...transactionDateRange });
+    setExportError(null);
+    setExportSheetOpen(true);
+  };
+
+  const toggleCsvExportScope = (scope: CsvExportScope, checked: boolean) => {
+    setSelectedCsvExportScopes((current) => {
+      if (checked) return current.includes(scope) ? current : [...current, scope];
+      return current.filter((item) => item !== scope);
+    });
+  };
+
+  const updateExportDatePreset = (preset: ExportDatePreset) => {
+    setExportDatePreset(preset);
+    if (preset !== "custom") setExportDateRange(getExportDatePresetRange(preset));
+  };
+
+  const updateCustomExportDate = (key: keyof ExportDateRange, value: string) => {
+    setExportDatePreset("custom");
+    setExportDateRange((current) => ({ ...current, [key]: value || null }));
+  };
+
   const markColumnModifierSelect = (event: { shiftKey: boolean }) => {
     columnModifierSelectRef.current = event.shiftKey;
   };
@@ -678,19 +1089,334 @@ export default function PortfolioDetailPage() {
     columnModifierSelectRef.current = false;
   };
 
-  const handleExport = (format: "csv" | "xlsx" | "json") => {
-    if (activeExportRows.length === 0) {
-      toast.error("No rows to export");
-      return;
+  const fetchChartExportRows = async (
+    dateRange: ExportDateRange,
+  ): Promise<{ rows: ExportRow[]; returnRows: ExportRow[]; returnHeaders: string[] }> => {
+    if (!portfolioId) {
+      return {
+        rows: [],
+        returnRows: [],
+        returnHeaders: PORTFOLIO_RETURN_EXPORT_HEADERS,
+      };
     }
-    const safeName = activeExportName
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "");
-    if (format === "csv") exportToCsv(`${safeName}.csv`, activeExportRows);
-    if (format === "xlsx") exportToXlsx(`${safeName}.xlsx`, activeExportRows);
-    if (format === "json") exportToJson(`${safeName}.json`, activeExportRows);
-    toast.success(`${activeTab === "holdings" ? "Holdings" : "Transactions"} exported`);
+    const response = await fetch(`${API_BASE_URL}/api/portfolios/${portfolioId}/chart`, {
+      headers: await authHeaders(),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || "Failed to load portfolio value history");
+
+    const chartRows = ((body.series ?? []) as ChartSeries[]).filter((point) =>
+      isWithinDateRange(point.date, dateRange),
+    );
+    const activeBenchmarks = loadStoredActiveBenchmarks(portfolioId);
+    const firstDate = chartRows[0]?.date;
+    const benchmarkPrices = new Map<string, BenchmarkPricePoint[]>();
+
+    if (firstDate) {
+      await Promise.all(
+        activeBenchmarks.map(async (benchmark) => {
+          const ticker = benchmark.ticker.toUpperCase();
+          const benchmarkResponse = await fetch(
+            `${API_BASE_URL}/api/benchmarks/${encodeURIComponent(ticker)}/prices?from=${encodeURIComponent(firstDate)}`,
+          );
+          if (!benchmarkResponse.ok) {
+            benchmarkPrices.set(ticker, []);
+            return;
+          }
+          const benchmarkBody = (await benchmarkResponse.json()) as BenchmarkPricePoint[];
+          benchmarkPrices.set(
+            ticker,
+            Array.isArray(benchmarkBody)
+              ? benchmarkBody
+                  .filter((point) => Number.isFinite(point.close) && point.close > 0)
+                  .sort((a, b) => a.date.localeCompare(b.date))
+              : [],
+          );
+        }),
+      );
+    }
+
+    const benchmarkReturnSeries = new Map<string, Array<{ date: string; value: number }>>();
+    for (const benchmark of activeBenchmarks) {
+      const ticker = benchmark.ticker.toUpperCase();
+      benchmarkReturnSeries.set(ticker, benchmarkPricesToReturnPoints(benchmarkPrices.get(ticker) ?? []));
+    }
+
+    const rowsWithBenchmarks = chartRows.map((point) => {
+      const row: ExportRow = {
+        Date: point.date,
+        "Total Value": point.total_value,
+        "Cash Balance": point.cash_balance,
+        "Securities Value": point.securities_value,
+        "Simple Return %": point.simple_return_pct,
+        "TWR %": point.twr_pct,
+      };
+      for (const benchmark of activeBenchmarks) {
+        row[benchmarkColumnName(benchmark)] = latestReturnOnOrBefore(
+          benchmarkReturnSeries.get(benchmark.ticker.toUpperCase()) ?? [],
+          point.date,
+        );
+      }
+      return row;
+    });
+
+    const returnHeaders = [...PORTFOLIO_RETURN_EXPORT_HEADERS];
+    const monthlyReturnByPeriod = new Map<string, ExportRow>();
+    for (const point of computeMonthlyReturnValues(
+      chartRows.map((row) => ({ date: row.date, value: row.twr_pct })),
+    )) {
+      monthlyReturnByPeriod.set(point.period, {
+        Period: point.period,
+        "Portfolio Return %": point.value ?? "",
+      });
+    }
+
+    for (const benchmark of activeBenchmarks) {
+      const columnName = benchmarkReturnColumnName(benchmark);
+      if (!returnHeaders.includes(columnName)) returnHeaders.push(columnName);
+      const benchmarkReturnRows = computeMonthlyReturnValues(
+        benchmarkPricesToReturnPoints(benchmarkPrices.get(benchmark.ticker.toUpperCase()) ?? []),
+      );
+      for (const point of benchmarkReturnRows) {
+        const row = monthlyReturnByPeriod.get(point.period) ?? { Period: point.period };
+        row[columnName] = point.value ?? "";
+        monthlyReturnByPeriod.set(point.period, row);
+      }
+    }
+
+    return {
+      rows: rowsWithBenchmarks,
+      returnRows: Array.from(monthlyReturnByPeriod.values()),
+      returnHeaders,
+    };
+  };
+
+  const fetchGeographyExportRows = async (): Promise<ExportRow[]> => {
+    if (!portfolioId) return [];
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/portfolios/${portfolioId}/geography`, {
+        headers: await authHeaders(),
+      });
+      if (!response.ok) return [];
+      const body = (await response.json()) as GeographyResponse;
+      const countryRows = (body.countries ?? []).map((country) => ({
+        Category: "Geography",
+        Name: country.countryName ?? "Unknown",
+        Code: country.countryCode ?? "",
+        Value: country.value ?? "",
+        "Weight %": country.percentage ?? "",
+        Source: country.source ?? "",
+        Confidence: country.confidence ?? "",
+        "Checked At": body.checkedAt ?? "",
+        Notes: "",
+      }));
+      return countryRows;
+    } catch {
+      return [];
+    }
+  };
+
+  const fetchSavedBenchmarkRows = async (): Promise<ExportRow[]> => {
+    if (!portfolioId) return [];
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/portfolios/${portfolioId}/benchmarks/saved`,
+        { headers: await authHeaders() },
+      );
+      if (!response.ok) return [];
+      const body = (await response.json()) as { benchmarks?: BenchmarkDefinition[] };
+      const activeBenchmarks = loadStoredActiveBenchmarks(portfolioId);
+      const activeIds = new Set(activeBenchmarks.map((benchmark) => benchmark.id).filter(Boolean));
+      const activeTickers = new Set(
+        activeBenchmarks.map((benchmark) => benchmark.ticker.toUpperCase()).filter(Boolean),
+      );
+      return (body.benchmarks ?? []).map((benchmark) => {
+        const ticker = benchmark.ticker.toUpperCase();
+        const active = Boolean(
+          (benchmark.id && activeIds.has(benchmark.id)) || activeTickers.has(ticker),
+        );
+        return {
+          Name: benchmark.name,
+          Ticker: ticker,
+          Color: benchmark.color ?? "",
+          Weights:
+            benchmark.weights == null || benchmark.weights === ""
+              ? ""
+              : JSON.stringify(benchmark.weights),
+          "Created At": benchmark.created_at ?? "",
+          Active: active ? "Yes" : "No",
+        };
+      });
+    } catch {
+      return [];
+    }
+  };
+
+  const fetchTransactionExportRows = async (dateRange: ExportDateRange) => {
+    if (!portfolioId) return [];
+    const response = await fetch(`${API_BASE_URL}/api/portfolios/${portfolioId}/transactions`, {
+      headers: await authHeaders(),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || "Failed to load transactions");
+    return ((body.transactions ?? []) as TransactionApiRow[])
+      .filter((transaction) => isWithinDateRange(transaction.date, dateRange))
+      .map(transactionToExportRow);
+  };
+
+  const fetchLastPriceMap = async (): Promise<
+    Record<string, { date: string | null; close: number | null }>
+  > => {
+    if (!portfolioId) return {};
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/portfolios/${portfolioId}/last-prices`,
+        { headers: await authHeaders() },
+      );
+      if (!response.ok) return {};
+      const body = (await response.json()) as Array<{
+        ticker: string;
+        date: string | null;
+        close: number | null;
+      }>;
+      return body.reduce<Record<string, { date: string | null; close: number | null }>>(
+        (acc, entry) => {
+          acc[entry.ticker.toUpperCase()] = { date: entry.date, close: entry.close };
+          return acc;
+        },
+        {},
+      );
+    } catch {
+      return {};
+    }
+  };
+
+  const buildExportDataset = async (dateRange: ExportDateRange): Promise<ExportDataset> => {
+    const [portfolioExport, transactionsRows, geographyRows, savedBenchmarkRows, lastPriceMap] =
+      await Promise.all([
+        fetchChartExportRows(dateRange),
+        fetchTransactionExportRows(dateRange),
+        fetchGeographyExportRows(),
+        fetchSavedBenchmarkRows(),
+        fetchLastPriceMap(),
+      ]);
+    const enrichedHoldingsRows = holdingsSnapshotRows.map((row) => {
+      const ticker = String(row.Ticker ?? "").toUpperCase();
+      const entry = lastPriceMap[ticker];
+      if (!entry) return row;
+      return {
+        ...row,
+        "Last Price": entry.close ?? row["Last Price"] ?? null,
+        "Last Price Update": entry.date ?? row["Last Price Update"] ?? "",
+      };
+    });
+    const allocationRows = [...allocationExportRows, ...geographyRows];
+    const portfolioSummary: ExportRow = {
+      "Portfolio Name": portfolio?.name ?? "Portfolio",
+      "Total Value": totalValue,
+      Cash: cashValue,
+      "Cost Basis": totalCost,
+      "Unrealized P/L": totalPL,
+      "Return %": Number(returnPct.toFixed(2)),
+      Holdings: holdings.length,
+    };
+
+    return {
+      portfolioRows: portfolioExport.rows,
+      portfolioReturnRows: portfolioExport.returnRows,
+      portfolioReturnHeaders: portfolioExport.returnHeaders,
+      allocationRows,
+      holdingsRows: enrichedHoldingsRows,
+      transactionsRows,
+      savedBenchmarkRows,
+      jsonPayload: {
+        meta: {
+          exported_at: new Date().toISOString(),
+          portfolio_name: portfolio?.name ?? "Portfolio",
+          account_type: "Unknown",
+          currency: "USD",
+          date_range: dateRange,
+        },
+        portfolio: {
+          summary: portfolioSummary,
+          value_history: portfolioExport.rows,
+        },
+        allocation: {
+          sectors: sectorAllocationRows,
+          asset_types: assetTypeAllocationRows,
+          geography: geographyRows,
+        },
+        holdings: enrichedHoldingsRows,
+        transactions: transactionsRows,
+        saved_benchmarks: savedBenchmarkRows,
+      },
+    };
+  };
+
+  const handleExportDownload = async () => {
+    if (!portfolio) return;
+    if (exportFormat === "csv" && selectedCsvExportScopes.length === 0) return;
+    setExportSubmitting(true);
+    setExportError(null);
+    try {
+      const dataset = await buildExportDataset(exportDateRange);
+      const portfolioHeaders = [...PORTFOLIO_EXPORT_HEADERS];
+      for (const row of dataset.portfolioRows) {
+        for (const key of Object.keys(row)) {
+          if (!portfolioHeaders.includes(key)) portfolioHeaders.push(key);
+        }
+      }
+
+      if (exportFormat === "xlsx") {
+        exportToXlsx(formatExportFilename(portfolio.name, "export", "xlsx"), [
+          {
+            name: "Portfolio Value",
+            rows: dataset.portfolioRows,
+            headers: portfolioHeaders,
+            sections: [
+              {
+                title: "Bars (returns)",
+                rows: dataset.portfolioReturnRows,
+                headers: dataset.portfolioReturnHeaders,
+              },
+            ],
+          },
+          { name: "Allocation", rows: dataset.allocationRows, headers: ALLOCATION_EXPORT_HEADERS },
+          { name: "Holdings", rows: dataset.holdingsRows, headers: HOLDINGS_EXPORT_HEADERS },
+          {
+            name: "Transactions",
+            rows: dataset.transactionsRows,
+            headers: TRANSACTION_EXPORT_HEADERS,
+          },
+          {
+            name: "Saved Benchmarks",
+            rows: dataset.savedBenchmarkRows,
+            headers: SAVED_BENCHMARKS_EXPORT_HEADERS,
+          },
+        ]);
+      } else if (exportFormat === "csv") {
+        const csvRowsByScope: Record<CsvExportScope, { rows: ExportRow[]; headers: string[] }> = {
+          portfolio: { rows: dataset.portfolioRows, headers: portfolioHeaders },
+          allocation: { rows: dataset.allocationRows, headers: ALLOCATION_EXPORT_HEADERS },
+          holdings: { rows: dataset.holdingsRows, headers: HOLDINGS_EXPORT_HEADERS },
+          transactions: { rows: dataset.transactionsRows, headers: TRANSACTION_EXPORT_HEADERS },
+        };
+        for (const scope of selectedCsvExportScopes) {
+          const csvData = csvRowsByScope[scope];
+          exportToCsv(formatExportFilename(portfolio.name, scope, "csv"), csvData.rows, csvData.headers);
+        }
+      } else {
+        exportToJson(formatExportFilename(portfolio.name, "export", "json"), dataset.jsonPayload);
+      }
+
+      toast.success("Export downloaded");
+      setExportSheetOpen(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Export failed";
+      setExportError(message);
+    } finally {
+      setExportSubmitting(false);
+    }
   };
 
   if (loading)
@@ -761,14 +1487,11 @@ export default function PortfolioDetailPage() {
           <div className="flex shrink-0 gap-2">
             <button
               type="button"
-              onClick={() => {
-                setCashAction("deposit");
-                setCashDialogOpen(true);
-              }}
+              onClick={openExportSheet}
               className="inline-flex items-center gap-1.5 rounded-full border border-hairline bg-surface px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-surface-2"
             >
-              <Plus className="h-3.5 w-3.5" />
-              Add cash
+              <Download className="h-3.5 w-3.5" />
+              Export
             </button>
           </div>
         </div>
@@ -1004,15 +1727,30 @@ export default function PortfolioDetailPage() {
 
               <div className="ml-auto flex shrink-0 items-center gap-2">
                 {activeTab === "holdings" ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() => setAddHoldingOpen(true)}
-                    className="rounded-full px-4"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    Add holding
-                  </Button>
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setCashAction("deposit");
+                        setCashDialogOpen(true);
+                      }}
+                      className="rounded-full bg-background px-4"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Add cash
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => setAddHoldingOpen(true)}
+                      className="rounded-full px-4"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Add holding
+                    </Button>
+                  </>
                 ) : (
                   <Button
                     type="button"
@@ -1024,42 +1762,6 @@ export default function PortfolioDetailPage() {
                     Import transactions
                   </Button>
                 )}
-
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-10 w-10 rounded-full"
-                      aria-label="Table export options"
-                    >
-                      <MoreVertical className="h-5 w-5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-44">
-                    <DropdownMenuLabel>Export</DropdownMenuLabel>
-                    <DropdownMenuGroup>
-                      <DropdownMenuItem onClick={() => handleExport("csv")}>
-                        <FileText className="h-4 w-4" />
-                        CSV
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleExport("xlsx")}>
-                        <FileSpreadsheet className="h-4 w-4" />
-                        XLSX
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleExport("json")}>
-                        <FileJson className="h-4 w-4" />
-                        JSON
-                      </DropdownMenuItem>
-                    </DropdownMenuGroup>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem disabled>
-                      <FileText className="h-4 w-4" />
-                      PDF coming soon
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
               </div>
             </div>
 
@@ -1310,11 +2012,198 @@ export default function PortfolioDetailPage() {
                 searchQuery={transactionSearch}
                 dateRange={transactionDateRange}
                 onDeleted={() => load()}
-                onExportRowsChange={setTransactionExportRows}
               />
             </TabsContent>
           </div>
         </Tabs>
+
+        <Sheet open={exportSheetOpen} onOpenChange={setExportSheetOpen}>
+          <SheetContent side="right" className="flex w-[min(440px,100vw)] flex-col gap-0 p-0 sm:max-w-[440px]">
+            <SheetHeader className="border-b border-hairline px-5 py-4 pr-12">
+              <SheetTitle className="text-base">Export</SheetTitle>
+              <SheetDescription>Download portfolio data for analysis or backup.</SheetDescription>
+            </SheetHeader>
+
+            <div className="flex-1 space-y-6 overflow-y-auto px-5 py-5">
+              <section className="space-y-2">
+                <Label className="text-xs uppercase tracking-wider text-foreground-muted">
+                  Format
+                </Label>
+                <div className="flex flex-wrap gap-2">
+                  {(
+                    [
+                      ["xlsx", "Excel", FileSpreadsheet],
+                      ["csv", "CSV", FileText],
+                      ["json", "JSON", FileJson],
+                    ] as const
+                  ).map(([value, label, Icon]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setExportFormat(value)}
+                      className={`inline-flex h-9 items-center gap-2 rounded-full border px-3 text-xs font-medium transition-colors ${
+                        exportFormat === value
+                          ? "border-foreground bg-foreground text-background"
+                          : "border-hairline bg-surface text-foreground-muted hover:bg-surface-2 hover:text-foreground"
+                      }`}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      {label}
+                    </button>
+                  ))}
+                  <TooltipProvider delayDuration={150}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          disabled
+                          className="inline-flex h-9 cursor-not-allowed items-center gap-2 rounded-full border border-hairline bg-surface px-3 text-xs font-medium text-foreground-muted opacity-50"
+                        >
+                          <FileText className="h-3.5 w-3.5" />
+                          PDF Report
+                          <span className="rounded-full bg-surface-2 px-1.5 py-0.5 text-[10px] uppercase tracking-wider">
+                            Soon
+                          </span>
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="right" sideOffset={8} className="max-w-64 text-center">
+                        PDF Report is coming soon. It will include AI-generated commentary and
+                        time-scoped views.
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+              </section>
+
+              {exportFormat === "csv" && (
+                <section className="space-y-2">
+                  <FieldSet>
+                    <FieldLegend variant="label">What to export</FieldLegend>
+                    <FieldGroup className="gap-3">
+                      {(
+                        [
+                          ["portfolio", "Portfolio"],
+                          ["allocation", "Allocation"],
+                          ["holdings", "Holdings"],
+                          ["transactions", "Transactions"],
+                        ] as const
+                      ).map(([value, label]) => (
+                        <Field key={value} orientation="horizontal">
+                          <Checkbox
+                            id={`export-scope-${value}`}
+                            checked={selectedCsvExportScopes.includes(value)}
+                            onCheckedChange={(checked) =>
+                              toggleCsvExportScope(value, checked === true)
+                            }
+                          />
+                          <FieldLabel
+                            htmlFor={`export-scope-${value}`}
+                            className="cursor-pointer font-normal"
+                          >
+                            {label}
+                          </FieldLabel>
+                        </Field>
+                      ))}
+                    </FieldGroup>
+                  </FieldSet>
+                  <p className="flex gap-2 rounded-lg bg-surface-2 px-3 py-2 text-xs leading-relaxed text-foreground-muted">
+                    <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>
+                      Selecting multiple datasets downloads one CSV file for each checked option.
+                    </span>
+                  </p>
+                  {selectedCsvExportScopes.length === 0 && (
+                    <p className="text-xs text-destructive">
+                      Select at least one dataset to download CSV.
+                    </p>
+                  )}
+                </section>
+              )}
+
+              <section className="space-y-3">
+                <div className="space-y-2">
+                  <Label
+                    htmlFor="export-date-range"
+                    className="text-xs uppercase tracking-wider text-foreground-muted"
+                  >
+                    Date range
+                  </Label>
+                  <Select value={exportDatePreset} onValueChange={updateExportDatePreset}>
+                    <SelectTrigger id="export-date-range" className="h-10 rounded-full bg-background">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all_time">All time</SelectItem>
+                      <SelectItem value="ytd">YTD</SelectItem>
+                      <SelectItem value="last_12_months">Last 12 months</SelectItem>
+                      <SelectItem value="last_quarter">Last quarter</SelectItem>
+                      <SelectItem value="custom">Custom</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {exportDatePreset === "custom" && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="export-date-from" className="text-xs text-foreground-muted">
+                        Start date
+                      </Label>
+                      <Input
+                        id="export-date-from"
+                        type="date"
+                        value={exportDateRange.from ?? ""}
+                        onChange={(event) => updateCustomExportDate("from", event.target.value)}
+                        className="h-9 rounded-full bg-background text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="export-date-to" className="text-xs text-foreground-muted">
+                        End date
+                      </Label>
+                      <Input
+                        id="export-date-to"
+                        type="date"
+                        value={exportDateRange.to ?? ""}
+                        onChange={(event) => updateCustomExportDate("to", event.target.value)}
+                        className="h-9 rounded-full bg-background text-xs"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <p className="flex gap-2 rounded-lg bg-surface-2 px-3 py-2 text-xs leading-relaxed text-foreground-muted">
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    Date range applies to transactions and portfolio history. Holdings and
+                    allocation reflect current values.
+                  </span>
+                </p>
+              </section>
+            </div>
+
+            <SheetFooter className="border-t border-hairline px-5 py-4">
+              {exportError && (
+                <p className="mr-auto text-left text-xs text-destructive">{exportError}</p>
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setExportSheetOpen(false)}
+                disabled={exportSubmitting}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={handleExportDownload}
+                disabled={exportSubmitting || (exportFormat === "csv" && selectedCsvExportScopes.length === 0)}
+              >
+                <Download className="h-4 w-4" />
+                {exportSubmitting ? "Preparing..." : "Download"}
+              </Button>
+            </SheetFooter>
+          </SheetContent>
+        </Sheet>
 
         {/* Modals */}
         <AddHoldingModal
