@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 import { runThemeFadeTransition } from "@/components/lightswind/theme-transition";
+import { Switch } from "@/components/ui/switch";
 
 type ThemeMode = "light" | "dark";
 
@@ -57,30 +58,32 @@ export function ThemeSwitcher({ compact = false }: { compact?: boolean }) {
   const label = isDark ? "Dark mode" : "Light mode";
   const nextLabel = isDark ? "Switch to light mode" : "Switch to dark mode";
 
+  if (compact) {
+    return (
+      <button
+        type="button"
+        onClick={handleToggle}
+        className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-sm font-medium text-foreground-muted transition-colors hover:bg-surface-2 hover:text-foreground"
+        aria-label={nextLabel}
+        title={nextLabel}
+      >
+        <Icon className="h-4 w-4 shrink-0" />
+      </button>
+    );
+  }
+
   return (
-    <button
-      type="button"
-      onClick={handleToggle}
-      className={`inline-flex items-center rounded-lg text-sm font-medium text-foreground-muted transition-colors hover:bg-surface-2 hover:text-foreground ${
-        compact ? "h-9 w-9 justify-center" : "w-full gap-2 px-2.5 py-2"
-      }`}
+    <label
+      className="inline-flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium text-foreground-muted transition-colors hover:bg-surface-2 hover:text-foreground"
       aria-label={nextLabel}
-      title={compact ? nextLabel : undefined}
     >
       <Icon className="h-4 w-4 shrink-0" />
-      {!compact && (
-        <>
-          <span className="truncate">{label}</span>
-          <span
-            className={`ml-auto flex h-5 w-9 items-center rounded-full border border-hairline px-0.5 transition-colors ${
-              isDark ? "justify-end bg-foreground/15" : "justify-start bg-surface-elevated"
-            }`}
-            aria-hidden
-          >
-            <span className="h-3.5 w-3.5 rounded-full bg-foreground shadow-sm" />
-          </span>
-        </>
-      )}
-    </button>
+      <span className="truncate">{label}</span>
+      <Switch
+        className="ml-auto"
+        checked={isDark}
+        onCheckedChange={() => handleToggle()}
+      />
+    </label>
   );
 }
