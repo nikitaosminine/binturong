@@ -397,7 +397,7 @@ export function ThesisCenteredModal({
                       {thesis.tickers.map((tk) => (
                         <span
                           key={tk}
-                          className="inline-flex items-center px-2 py-0.5 rounded bg-muted text-xs font-mono font-medium"
+                          className="inline-flex items-center rounded bg-muted px-2 py-0.5 font-mono text-[11px] font-medium tabular-nums"
                         >
                           {tk}
                         </span>
@@ -596,7 +596,7 @@ export function ThesisCenteredModal({
                   {tickers.map((tk) => (
                     <span
                       key={tk}
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-muted text-xs font-mono"
+                      className="inline-flex items-center gap-1 rounded bg-muted px-2 py-0.5 font-mono text-[11px] font-medium tabular-nums"
                     >
                       {tk}
                       <button
@@ -630,7 +630,9 @@ export function ThesisCenteredModal({
                         }}
                         className="w-full text-left px-2.5 py-1.5 rounded text-xs hover:bg-muted/50 flex items-center justify-between"
                       >
-                        <span className="font-mono font-medium">{s.ticker}</span>
+                        <span className="font-mono text-[11px] font-medium tabular-nums">
+                          {s.ticker}
+                        </span>
                         <span className="text-muted-foreground">{s.name}</span>
                       </button>
                     ))}

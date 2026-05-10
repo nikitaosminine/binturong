@@ -9,7 +9,7 @@ function StatCard({ label, value, sub }: { label: string; value: number; sub?: s
   return (
     <div className="rounded-lg border border-border/50 bg-card p-4">
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="text-2xl font-bold tracking-tight mt-1">{value}</p>
+      <p className="mt-1 font-mono text-2xl font-medium tabular-nums">{value}</p>
       {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
     </div>
   );

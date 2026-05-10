@@ -9,10 +9,8 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowBigUp,
-  Check,
   CalendarDays,
   Columns3,
-  Copy,
   FileJson,
   FileSpreadsheet,
   FileText,
@@ -34,6 +32,7 @@ import { Thesis, thesesForTicker } from "@/lib/thesis";
 import { EditHoldingModal } from "@/components/edit-holding-modal";
 import { AddHoldingModal } from "@/components/add-holding-modal";
 import { ImportTransactionsModal } from "@/components/import-transactions-modal";
+import { AnimatedCopyButton } from "@/components/lightswind/animated-copy-button";
 import { PortfolioChart } from "@/components/portfolio-chart";
 import { PrimaryTabs } from "@/components/primary-tabs";
 import { OrbitRing } from "@/components/loading-ui/orbit-ring";
@@ -312,7 +311,9 @@ function PerfCell({ value, money }: { value: number; money?: boolean }) {
     ? `${value > 0 ? "+" : value < 0 ? "−" : ""}${fmt$(Math.abs(value))}`
     : fmtPct(value);
   return (
-    <span className={`inline-flex items-center justify-end gap-1 tabular-nums ${tone}`}>
+    <span
+      className={`inline-flex items-center justify-end gap-1 font-mono text-[11px] tabular-nums ${tone}`}
+    >
       <Icon className="h-3 w-3" aria-hidden />
       {text}
     </span>
@@ -639,19 +640,10 @@ export default function PortfolioDetailPage() {
     }
   };
 
-  const copyIsin = async (rowId: string, isin: string | null) => {
-    if (!isin) {
-      toast.error("No ISIN available for this holding");
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(isin);
-      setCopiedId(rowId);
-      setTimeout(() => setCopiedId(null), 2000);
-    } catch {
-      toast.error("Failed to copy ISIN");
-    }
-  };
+  const markIsinCopied = useCallback((rowId: string) => {
+    setCopiedId(rowId);
+    window.setTimeout(() => setCopiedId(null), 1200);
+  }, []);
 
   const applyTransactionPreset = (preset: DatePreset) => {
     setTransactionDateRange(getPresetRange(preset));
@@ -727,7 +719,7 @@ export default function PortfolioDetailPage() {
   const KPIS = [
     { label: "Total value", value: fmt$(totalValue) },
     { label: "Cash", value: fmt$(cashValue), muted: cashValue === 0 },
-    { label: "Cost basis", value: fmt$(totalCost) },
+    { label: "Cost basis", value: fmt$(totalCost), hierarchy: "secondary" },
     {
       label: "Unrealized P/L",
       value: totalPL === 0 ? "—" : fmt$(totalPL),
@@ -789,18 +781,24 @@ export default function PortfolioDetailPage() {
           {/* Left: KPI strip + chart */}
           <div className="flex flex-col gap-6" style={{ height: ROW_HEIGHT }}>
             {/* KPI strip */}
-            <div className="flex flex-wrap items-center justify-between gap-x-5 gap-y-2 rounded-2xl border border-hairline bg-surface px-4 py-2.5">
-              <dl className="flex flex-wrap items-center gap-x-5 gap-y-1">
+            <div className="rounded-2xl border border-hairline bg-surface px-4 py-3">
+              <dl className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2 xl:grid-cols-5">
                 {KPIS.map((kpi, i) => (
                   <div
                     key={kpi.label}
-                    className={`flex items-baseline gap-2 ${i > 0 ? "border-l border-hairline pl-5" : ""}`}
+                    className={`min-w-0 ${i > 0 ? "xl:border-l xl:border-hairline xl:pl-4" : ""}`}
                   >
-                    <dt className="text-[10px] uppercase tracking-[0.12em] text-foreground-muted">
+                    <dt
+                      className={`truncate text-[13px] font-medium uppercase tracking-[0.12em] ${
+                        kpi.hierarchy === "secondary"
+                          ? "text-foreground-muted/70"
+                          : "text-muted-foreground"
+                      }`}
+                    >
                       {kpi.label}
                     </dt>
                     <dd
-                      className={`text-sm font-semibold tabular-nums ${
+                      className={`mt-1 truncate font-mono text-[clamp(18px,1.35vw,22px)] font-medium leading-none tabular-nums ${
                         kpi.muted
                           ? "text-foreground-muted"
                           : kpi.tone === "positive"
@@ -823,7 +821,7 @@ export default function PortfolioDetailPage() {
                 Portfolio value
               </div>
               <div className="h-1 shrink-0" />
-              <div className="shrink-0">
+              <div className="min-h-0 flex-1">
                 <PortfolioChart portfolioId={portfolioId} />
               </div>
             </div>
@@ -1186,23 +1184,19 @@ export default function PortfolioDetailPage() {
                                       <TooltipProvider>
                                         <Tooltip>
                                           <TooltipTrigger asChild>
-                                            <Button
-                                              variant="ghost"
-                                              size="icon"
-                                              className={`h-8 w-8 rounded-md border border-hairline bg-surface-2 transition-colors ${
-                                                copiedId === r.id
-                                                  ? "border-foreground/40 text-foreground"
-                                                  : "text-foreground-muted"
-                                              }`}
-                                              onClick={() => copyIsin(r.id, r.isin)}
-                                              aria-label="Copy ISIN"
-                                            >
-                                              {copiedId === r.id ? (
-                                                <Check className="h-3.5 w-3.5" />
-                                              ) : (
-                                                <Copy className="h-3.5 w-3.5" />
-                                              )}
-                                            </Button>
+                                            <AnimatedCopyButton
+                                              textToCopy={r.isin ?? ""}
+                                              size="sm"
+                                              ariaLabel="Copy ISIN"
+                                              onCopy={() => markIsinCopied(r.id)}
+                                              onCopyError={() =>
+                                                toast.error(
+                                                  r.isin
+                                                    ? "Failed to copy ISIN"
+                                                    : "No ISIN available for this holding",
+                                                )
+                                              }
+                                            />
                                           </TooltipTrigger>
                                           <TooltipContent>
                                             <p>
@@ -1219,33 +1213,45 @@ export default function PortfolioDetailPage() {
                                         <div className="truncate font-medium text-foreground">
                                           {r.name}
                                         </div>
-                                        <div className="text-[10px] tabular-nums text-foreground-muted">
-                                          {r.ticker}
-                                          {r.isin ? ` · ${r.isin}` : ""}
+                                        <div className="flex flex-wrap items-center gap-x-1.5 text-foreground-muted">
+                                          <span className="font-mono text-[11px] font-medium tabular-nums">
+                                            {r.ticker}
+                                          </span>
+                                          {r.isin && (
+                                            <span className="font-mono text-[11px] font-normal text-muted-foreground">
+                                              {r.isin}
+                                            </span>
+                                          )}
                                         </div>
                                       </div>
                                     </div>
                                   )}
-                                  {key === "qty" && <span className="tabular-nums">{r.qty}</span>}
+                                  {key === "qty" && (
+                                    <span className="font-mono text-[11px] tabular-nums">
+                                      {r.qty}
+                                    </span>
+                                  )}
                                   {key === "assetType" && (
                                     <span className="text-foreground-muted">{r.assetType}</span>
                                   )}
                                   {key === "cur" && (
-                                    <span className="tabular-nums">{fmt$(r.cur)}</span>
+                                    <span className="font-mono text-[11px] tabular-nums">
+                                      {fmt$(r.cur)}
+                                    </span>
                                   )}
                                   {key === "buy" && (
-                                    <span className="tabular-nums text-foreground-muted">
+                                    <span className="font-mono text-[11px] tabular-nums text-foreground-muted">
                                       {fmt$(r.buy)}
                                     </span>
                                   )}
                                   {key === "total" && (
-                                    <span className="tabular-nums font-medium">
+                                    <span className="font-mono text-[11px] font-medium tabular-nums">
                                       {fmt$(r.total)}
                                     </span>
                                   )}
                                   {key === "gl" && <PerfCell value={r.gl} money />}
                                   {key === "weight" && (
-                                    <span className="tabular-nums text-foreground-muted">
+                                    <span className="font-mono text-[11px] tabular-nums text-foreground-muted">
                                       {r.weight.toFixed(1)}%
                                     </span>
                                   )}

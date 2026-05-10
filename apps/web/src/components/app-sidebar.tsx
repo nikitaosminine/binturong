@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { BarChart3, ChevronLeft, LogOut, Settings } from "lucide-react";
+import { BarChart3, LogOut, PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
 import { NodeLogo } from "@/components/node-logo";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { supabase } from "@/integrations/supabase/client";
@@ -51,33 +51,24 @@ export function AppSidebar({ children }: { children: ReactNode }) {
       >
         {/* Logo */}
         <div
-          className={`flex h-14 items-center border-b border-hairline ${
-            collapsed ? "justify-between gap-1 px-2" : "justify-between px-3"
+          className={`relative flex h-14 items-center border-b border-hairline ${
+            collapsed ? "justify-center px-2" : "justify-start px-3"
           }`}
         >
           <Link
             to="/portfolios"
             aria-label="Node home"
             className={`flex min-w-0 items-center ${
-              collapsed ? "shrink-0 justify-center overflow-visible" : "gap-2 overflow-hidden"
+              collapsed
+                ? "absolute left-1/2 h-10 w-10 -translate-x-1/2 justify-center overflow-hidden"
+                : "gap-2 overflow-hidden"
             }`}
           >
-            <NodeLogo className={collapsed ? "h-8 w-8" : "h-9 w-9"} />
+            <NodeLogo className={collapsed ? "h-9 w-9" : "h-8 w-8"} />
             {!collapsed && (
               <span className="truncate text-base font-semibold tracking-tight">Node</span>
             )}
           </Link>
-          <button
-            type="button"
-            onClick={() => setCollapsed((c) => !c)}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-foreground-muted transition-colors hover:bg-surface-2 hover:text-foreground"
-            style={{ marginLeft: collapsed ? "-4px" : "0" }}
-          >
-            <ChevronLeft
-              className={`h-4 w-4 transition-transform ${collapsed ? "rotate-180" : ""}`}
-            />
-          </button>
         </div>
 
         {/* Nav */}
@@ -140,7 +131,22 @@ export function AppSidebar({ children }: { children: ReactNode }) {
       </aside>
 
       {/* Main */}
-      <main className="min-w-0 flex-1">{children}</main>
+      <main className="relative min-w-0 flex-1">
+        <button
+          type="button"
+          onClick={() => setCollapsed((c) => !c)}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className="absolute left-3 top-3 z-30 grid h-8 w-8 place-items-center rounded-md border border-transparent text-foreground-muted transition-colors hover:border-hairline hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {collapsed ? (
+            <PanelLeftOpen className="h-4 w-4" aria-hidden />
+          ) : (
+            <PanelLeftClose className="h-4 w-4" aria-hidden />
+          )}
+        </button>
+        {children}
+      </main>
     </div>
   );
 }

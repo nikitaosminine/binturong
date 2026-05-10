@@ -205,7 +205,9 @@ function activeBenchmarksStorageKey(portfolioId: string) {
 
 function loadStoredActiveBenchmarks(portfolioId?: string): BenchmarkDefinition[] {
   if (!portfolioId || typeof window === "undefined") return [];
-  return parseStoredActiveBenchmarks(window.localStorage.getItem(activeBenchmarksStorageKey(portfolioId)));
+  return parseStoredActiveBenchmarks(
+    window.localStorage.getItem(activeBenchmarksStorageKey(portfolioId)),
+  );
 }
 
 function parseStoredActiveBenchmarks(value: string | null): BenchmarkDefinition[] {
@@ -218,7 +220,9 @@ function parseStoredActiveBenchmarks(value: string | null): BenchmarkDefinition[
         if (!item || typeof item !== "object") return null;
         const row = item as Record<string, unknown>;
         const name = String(row.name ?? "").trim();
-        const ticker = String(row.ticker ?? "").trim().toUpperCase();
+        const ticker = String(row.ticker ?? "")
+          .trim()
+          .toUpperCase();
         const color = String(row.color ?? "").trim();
         if (!name || !ticker || !color) return null;
         return {
@@ -240,9 +244,8 @@ function benchmarkLabelFromName(name: unknown, benchmarks: BenchmarkDefinition[]
   const key = String(name ?? "");
   if (key === "value" || key === "returnPct") return "Portfolio";
   return (
-    benchmarks.find(
-      (benchmark) => benchmarkKey(benchmark.ticker) === key || benchmark.name === key,
-    )?.name ?? "Benchmark"
+    benchmarks.find((benchmark) => benchmarkKey(benchmark.ticker) === key || benchmark.name === key)
+      ?.name ?? "Benchmark"
   );
 }
 
@@ -254,7 +257,7 @@ function toBenchmarkSeries(prices: BenchmarkPricePoint[]): PortfolioChartPoint[]
   if (!base) return [];
   return sorted.map((point) => ({
     time: point.date,
-    value: ((point.close / base) - 1) * 100,
+    value: (point.close / base - 1) * 100,
   }));
 }
 
@@ -279,7 +282,9 @@ function chooseBenchmarkColor(
   activeBenchmarks: BenchmarkDefinition[],
   savedBenchmarks: BenchmarkDefinition[],
 ) {
-  const used = new Set([...activeBenchmarks, ...savedBenchmarks].map((benchmark) => benchmark.color));
+  const used = new Set(
+    [...activeBenchmarks, ...savedBenchmarks].map((benchmark) => benchmark.color),
+  );
   return (
     BENCHMARK_PALETTE.find((color) => !used.has(color)) ??
     BENCHMARK_PALETTE[activeBenchmarks.length % BENCHMARK_PALETTE.length]
@@ -310,7 +315,9 @@ function ExpandableBenchmarkSearch({
   const [suggestions, setSuggestions] = useState<BenchmarkSuggestion[]>([]);
   const [searching, setSearching] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
-  const [suggestionStatus, setSuggestionStatus] = useState<"idle" | "loading" | "success" | "empty" | "error">("idle");
+  const [suggestionStatus, setSuggestionStatus] = useState<
+    "idle" | "loading" | "success" | "empty" | "error"
+  >("idle");
   const [savingTicker, setSavingTicker] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [colorChangingId, setColorChangingId] = useState<string | null>(null);
@@ -341,9 +348,12 @@ function ExpandableBenchmarkSearch({
     const timeout = setTimeout(async () => {
       setSearching(true);
       try {
-        const res = await fetch(`${API_BASE_URL}/api/benchmarks/search?q=${encodeURIComponent(query.trim())}`, {
-          signal: controller.signal,
-        });
+        const res = await fetch(
+          `${API_BASE_URL}/api/benchmarks/search?q=${encodeURIComponent(query.trim())}`,
+          {
+            signal: controller.signal,
+          },
+        );
         const body = await res.json();
         if (!res.ok) throw new Error(body.error || "Search failed");
         setResults(Array.isArray(body) ? body : []);
@@ -517,7 +527,9 @@ function ExpandableBenchmarkSearch({
                   onClick={() => setTab(id)}
                   className={cn(
                     "flex-1 rounded-full px-3 py-1 text-xs font-medium transition-colors",
-                    tab === id ? "bg-foreground text-background" : "text-foreground-muted hover:text-foreground",
+                    tab === id
+                      ? "bg-foreground text-background"
+                      : "text-foreground-muted hover:text-foreground",
                   )}
                 >
                   {label}
@@ -597,8 +609,12 @@ function ExpandableBenchmarkSearch({
                         onClick={() => onApply(result)}
                         className="min-w-0 flex-1 text-left disabled:opacity-50"
                       >
-                        <div className="break-words text-sm leading-snug text-foreground">{result.name}</div>
-                        <div className="break-all text-xs text-foreground-muted">{result.ticker}</div>
+                        <div className="break-words text-sm leading-snug text-foreground">
+                          {result.name}
+                        </div>
+                        <div className="break-all text-xs text-foreground-muted">
+                          {result.ticker}
+                        </div>
                       </button>
                       <button
                         type="button"
@@ -612,7 +628,9 @@ function ExpandableBenchmarkSearch({
                   ))
                 ) : (
                   <div className="px-2 py-3 text-xs text-foreground-muted">
-                    {query.trim().length >= 2 ? "No benchmarks found." : "Type at least 2 characters."}
+                    {query.trim().length >= 2
+                      ? "No benchmarks found."
+                      : "Type at least 2 characters."}
                   </div>
                 )}
               </div>
@@ -637,7 +655,9 @@ function ExpandableBenchmarkSearch({
                         <span className="block break-words text-sm leading-snug text-foreground">
                           {benchmark.name}
                         </span>
-                        <span className="block break-all text-xs text-foreground-muted">{benchmark.ticker}</span>
+                        <span className="block break-all text-xs text-foreground-muted">
+                          {benchmark.ticker}
+                        </span>
                       </span>
                     </button>
                     <div className="flex shrink-0 items-center gap-1">
@@ -669,7 +689,9 @@ function ExpandableBenchmarkSearch({
                 ))}
               </div>
             ) : (
-              <div className="px-2 py-3 text-xs text-foreground-muted">No saved benchmarks yet.</div>
+              <div className="px-2 py-3 text-xs text-foreground-muted">
+                No saved benchmarks yet.
+              </div>
             )}
           </motion.div>
         )}
@@ -690,7 +712,9 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
   );
   const [savedBenchmarks, setSavedBenchmarks] = useState<BenchmarkDefinition[]>([]);
   const [benchmarkPrices, setBenchmarkPrices] = useState<Record<string, BenchmarkPricePoint[]>>({});
-  const [loadingBenchmarkTickers, setLoadingBenchmarkTickers] = useState<Set<string>>(() => new Set());
+  const [loadingBenchmarkTickers, setLoadingBenchmarkTickers] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [activeBenchmarksHydratedFor, setActiveBenchmarksHydratedFor] = useState<string | null>(
     portfolioId ?? null,
   );
@@ -709,7 +733,10 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
 
   useEffect(() => {
     if (!portfolioId || activeBenchmarksHydratedFor !== portfolioId) return;
-    window.localStorage.setItem(activeBenchmarksStorageKey(portfolioId), JSON.stringify(activeBenchmarks));
+    window.localStorage.setItem(
+      activeBenchmarksStorageKey(portfolioId),
+      JSON.stringify(activeBenchmarks),
+    );
   }, [activeBenchmarks, activeBenchmarksHydratedFor, portfolioId]);
 
   const fetchChartData = useCallback(async () => {
@@ -741,7 +768,9 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || "Failed to load saved benchmarks");
-      setSavedBenchmarks((body.benchmarks ?? []).map((benchmark: BenchmarkDefinition) => benchmark));
+      setSavedBenchmarks(
+        (body.benchmarks ?? []).map((benchmark: BenchmarkDefinition) => benchmark),
+      );
     } catch {
       setSavedBenchmarks([]);
     }
@@ -816,7 +845,9 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
       setSavedBenchmarks((current) => current.filter((item) => item.id !== benchmark.id));
       setActiveBenchmarks((current) =>
         current.filter(
-          (item) => item.id !== benchmark.id && item.ticker.toUpperCase() !== benchmark.ticker.toUpperCase(),
+          (item) =>
+            item.id !== benchmark.id &&
+            item.ticker.toUpperCase() !== benchmark.ticker.toUpperCase(),
         ),
       );
     },
@@ -842,14 +873,14 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
       const updated = (body.benchmarks ?? []) as BenchmarkDefinition[];
       if (updated.length === 0) return;
       const updatedById = new Map(updated.map((item) => [item.id, item]));
-      setSavedBenchmarks((current) =>
-        current.map((item) => updatedById.get(item.id) ?? item),
-      );
+      setSavedBenchmarks((current) => current.map((item) => updatedById.get(item.id) ?? item));
       setActiveBenchmarks((current) =>
         current.map((item) => {
           const match =
             updatedById.get(item.id) ??
-            updated.find((updatedItem) => updatedItem.ticker.toUpperCase() === item.ticker.toUpperCase());
+            updated.find(
+              (updatedItem) => updatedItem.ticker.toUpperCase() === item.ticker.toUpperCase(),
+            );
           return match ? { ...item, color: match.color } : item;
         }),
       );
@@ -887,7 +918,7 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
           ? point.total_value
           : mode === "simple"
             ? point.simple_return_pct
-        : point.twr_pct,
+            : point.twr_pct,
     }));
   }, [chartSeries, data, mode]);
 
@@ -901,7 +932,11 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
     if (!inceptionDate) return;
     for (const benchmark of activeBenchmarks) {
       const ticker = benchmark.ticker.toUpperCase();
-      if (pricesCoverStart(benchmarkPrices[ticker], inceptionDate) || loadingBenchmarkTickers.has(ticker)) continue;
+      if (
+        pricesCoverStart(benchmarkPrices[ticker], inceptionDate) ||
+        loadingBenchmarkTickers.has(ticker)
+      )
+        continue;
       setLoadingBenchmarkTickers((current) => new Set(current).add(ticker));
       void (async () => {
         try {
@@ -910,7 +945,10 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
           );
           const body = await res.json();
           if (!res.ok) throw new Error(body.error || "Failed to load benchmark prices");
-          setBenchmarkPrices((current) => ({ ...current, [ticker]: Array.isArray(body) ? body : [] }));
+          setBenchmarkPrices((current) => ({
+            ...current,
+            [ticker]: Array.isArray(body) ? body : [],
+          }));
         } catch {
           setBenchmarkPrices((current) => ({ ...current, [ticker]: [] }));
         } finally {
@@ -951,10 +989,10 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
   );
 
   const benchmarkSeriesByTicker = useMemo(() => {
-    const entries = activeBenchmarks.map((benchmark) => [
-      benchmark.ticker,
-      toBenchmarkSeries(benchmarkPrices[benchmark.ticker] ?? []),
-    ] as const);
+    const entries = activeBenchmarks.map(
+      (benchmark) =>
+        [benchmark.ticker, toBenchmarkSeries(benchmarkPrices[benchmark.ticker] ?? [])] as const,
+    );
     return new Map(entries);
   }, [activeBenchmarks, benchmarkPrices]);
 
@@ -962,7 +1000,10 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
     return lineData.map((point) => {
       const row: Record<string, number | string | null> = { ...point };
       for (const benchmark of visibleBenchmarks) {
-        const value = latestValueOnOrBefore(benchmarkSeriesByTicker.get(benchmark.ticker) ?? [], point.time);
+        const value = latestValueOnOrBefore(
+          benchmarkSeriesByTicker.get(benchmark.ticker) ?? [],
+          point.time,
+        );
         row[benchmarkKey(benchmark.ticker)] = value;
       }
       return row;
@@ -975,10 +1016,9 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
       visibleBenchmarks.map((benchmark) => [
         benchmark.ticker,
         new Map(
-          computeReturns(benchmarkSeriesByTicker.get(benchmark.ticker) ?? [], barPeriod).map((bar) => [
-            bar.label,
-            bar.returnPct,
-          ]),
+          computeReturns(benchmarkSeriesByTicker.get(benchmark.ticker) ?? [], barPeriod).map(
+            (bar) => [bar.label, bar.returnPct],
+          ),
         ),
       ]),
     );
@@ -1011,7 +1051,7 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
   const fmtPct = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
 
   return (
-    <div className="relative flex flex-col gap-2 pt-16">
+    <div className="relative flex h-full min-h-0 flex-col gap-2 pt-16">
       <div className="absolute -top-2 right-0 z-20 flex items-start justify-end">
         <div className="flex flex-col items-end gap-2">
           <div className="text-[9px] font-medium uppercase tracking-[0.12em] text-foreground-muted">
@@ -1146,11 +1186,11 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
       </div>
 
       {loading ? (
-        <div className="h-[270px] w-full animate-pulse rounded-lg bg-surface-2" />
+        <div className="min-h-0 flex-1 animate-pulse rounded-lg bg-surface-2" />
       ) : view === "returns" ? (
         <ChartContainer
           config={chartConfig}
-          className={cn("w-full", hasVisibleBenchmarks ? "h-[282px]" : "h-[270px]")}
+          className={cn("min-h-[220px] w-full flex-1 !aspect-auto", hasVisibleBenchmarks && "pb-1")}
         >
           <BarChart data={barChartData} margin={{ left: 0, right: 0, top: 4, bottom: 0 }}>
             <CartesianGrid vertical={false} stroke="var(--hairline)" />
@@ -1206,7 +1246,7 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
       ) : (
         <ChartContainer
           config={chartConfig}
-          className={cn("w-full", hasVisibleBenchmarks ? "h-[282px]" : "h-[270px]")}
+          className={cn("min-h-[220px] w-full flex-1 !aspect-auto", hasVisibleBenchmarks && "pb-1")}
         >
           <AreaChart data={lineChartData} margin={{ left: 0, right: 0, top: 4, bottom: 0 }}>
             <defs>
@@ -1290,44 +1330,47 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
       )}
 
       {hasVisibleBenchmarks && (
-        <div className="relative border-t border-hairline pt-1 text-xs leading-none text-foreground-muted">
-          <div className="mx-auto flex max-w-[calc(100%-5rem)] flex-wrap items-center justify-center gap-x-4 gap-y-1.5">
-            <div className="flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-full bg-[var(--chart-accent)]" />
-              <span>Portfolio</span>
-            </div>
-            {visibleBenchmarks.map((benchmark) => (
-              <div key={benchmark.ticker} className="flex min-w-0 items-center gap-1.5">
-                <span
-                  className="h-2.5 w-2.5 shrink-0 rounded-full"
-                  style={{ backgroundColor: benchmarkColor(benchmark.color) }}
-                />
-                <span className="truncate">{benchmark.name}</span>
-                <button
-                  type="button"
-                  aria-label={`Remove ${benchmark.name}`}
-                  onClick={() =>
-                    setActiveBenchmarks((current) =>
-                      current.filter((item) => item.ticker !== benchmark.ticker),
-                    )
-                  }
-                  className="rounded-full p-0.5 text-foreground-muted hover:bg-surface-2 hover:text-foreground"
-                >
-                  <X className="h-3 w-3" />
-                </button>
+        <div className="shrink-0 border-t border-hairline pt-2 text-xs leading-none text-foreground-muted">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center justify-center gap-x-4 gap-y-1.5">
+              <div className="flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-full bg-[var(--chart-accent)]" />
+                <span>Portfolio</span>
               </div>
-            ))}
+              {visibleBenchmarks.map((benchmark) => (
+                <div key={benchmark.ticker} className="flex min-w-0 items-center gap-1.5">
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: benchmarkColor(benchmark.color) }}
+                  />
+                  <span className="truncate">{benchmark.name}</span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${benchmark.name}`}
+                    onClick={() =>
+                      setActiveBenchmarks((current) =>
+                        current.filter((item) => item.ticker !== benchmark.ticker),
+                      )
+                    }
+                    className="rounded-full p-0.5 text-foreground-muted hover:bg-surface-2 hover:text-foreground"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveBenchmarks([])}
+              className="shrink-0 rounded-full px-2 py-1 text-xs text-foreground-muted hover:bg-surface-2 hover:text-foreground"
+            >
+              Clear all
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => setActiveBenchmarks([])}
-            className="absolute right-0 top-1.5 rounded-full px-2 py-0.5 text-xs text-foreground-muted hover:bg-surface-2 hover:text-foreground"
-          >
-            Clear all
-          </button>
           {unavailableBenchmarks.length > 0 && (
             <div className="mt-2 text-center text-[11px] text-foreground-muted">
-              No benchmark price data for {unavailableBenchmarks.map((benchmark) => benchmark.name).join(", ")}.
+              No benchmark price data for{" "}
+              {unavailableBenchmarks.map((benchmark) => benchmark.name).join(", ")}.
             </div>
           )}
         </div>

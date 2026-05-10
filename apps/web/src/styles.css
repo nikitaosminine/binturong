@@ -15,6 +15,8 @@
  */
 
 @theme inline {
+  --font-sans: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "DM Mono", ui-monospace, monospace;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -214,7 +216,7 @@
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family:
-      "Inter",
+      "DM Sans",
       -apple-system,
       BlinkMacSystemFont,
       "Segoe UI",
@@ -224,9 +226,35 @@
   }
 }
 
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+.fall-beam-line::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: -96px;
+  width: 100%;
+  height: 96px;
+  background: linear-gradient(to bottom, transparent, var(--fall-beam-color));
+  animation: fall-beam var(--fall-beam-duration) var(--fall-beam-delay) linear infinite;
+}
+
+@keyframes fall-beam {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(calc(100vh + 160px));
+  }
+}
+
 /* Rich text editor output (ThesisStack) */
 .thesis-prose {
-  font-size: 13px;
+  font-size: 0.875rem;
   line-height: 1.55;
   color: var(--color-foreground);
 }
@@ -238,13 +266,13 @@
 }
 .thesis-prose h1,
 .thesis-prose h2 {
-  font-size: 15px;
+  font-size: 1rem;
   font-weight: 600;
   margin: 1em 0 0.4em;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
 }
 .thesis-prose h3 {
-  font-size: 13px;
+  font-size: 0.875rem;
   font-weight: 600;
   margin: 0.9em 0 0.3em;
   color: var(--color-muted-foreground);
