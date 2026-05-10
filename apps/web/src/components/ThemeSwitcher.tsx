@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
+import { runThemeFadeTransition } from "@/components/lightswind/theme-transition";
 
 type ThemeMode = "light" | "dark";
 
@@ -44,9 +45,11 @@ export function ThemeSwitcher({ compact = false }: { compact?: boolean }) {
 
   const handleToggle = () => {
     const next = mode === "dark" ? "light" : "dark";
-    setMode(next);
-    applyTheme(next);
-    localStorage.setItem(STORAGE_KEY, next);
+    runThemeFadeTransition(() => {
+      setMode(next);
+      applyTheme(next);
+      localStorage.setItem(STORAGE_KEY, next);
+    });
   };
 
   const isDark = mode === "dark";

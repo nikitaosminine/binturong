@@ -252,7 +252,7 @@ export default function ThesesPage() {
                     Signals mapped to your theses — review and act with context.
                   </p>
                 </div>
-                <span className="inline-flex w-20 shrink-0 justify-center rounded-md border border-border/50 bg-muted px-2 py-1 text-[10px] tabular-nums text-muted-foreground">
+                <span className="inline-flex w-20 shrink-0 justify-center rounded-md border border-border/50 bg-muted px-2 py-1 font-mono text-[11px] tabular-nums text-muted-foreground">
                   Live · {visibleInsights.length}
                 </span>
               </div>

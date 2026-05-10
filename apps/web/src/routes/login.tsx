@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NodeLogo } from "@/components/node-logo";
+import FallBeamBackground from "@/components/lightswind/fall-beam-background";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
@@ -57,8 +58,9 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
-      <div className="w-full max-w-sm">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 text-foreground">
+      <FallBeamBackground lineCount={24} beamColorClass="cyan-400" className="opacity-70" />
+      <div className="relative z-10 w-full max-w-sm">
         {/* Logo */}
         <div className="mb-8 flex items-center justify-center gap-3">
           <NodeLogo className="h-16 w-16" />
@@ -66,7 +68,7 @@ export default function LoginPage() {
         </div>
 
         {/* Card */}
-        <div className="rounded-xl border border-border/50 bg-card p-6">
+        <div className="rounded-xl border border-border/50 bg-card/95 p-6 shadow-xl shadow-background/20 backdrop-blur-sm">
           <div className="text-center space-y-1 mb-5">
             <h1 className="text-xl font-semibold tracking-tight">
               {isSignUp ? "Create your account" : "Welcome back"}

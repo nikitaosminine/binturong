@@ -33,7 +33,7 @@ export function PrimaryTabs() {
 
   return (
     <div className="h-14 border-b border-hairline">
-      <nav className="mx-auto flex h-full max-w-[1500px] items-center gap-1 px-6">
+      <nav className="mx-auto flex h-full max-w-[1500px] items-center gap-1 pl-14 pr-6">
         {TABS.map((t) => {
           const active = t.match(pathname);
           return (
