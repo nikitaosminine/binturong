@@ -43,6 +43,22 @@ import {
 } from "@/components/transaction-history-tab";
 import { AllocationCard } from "@/components/portfolio/AllocationCard";
 import {
+  convertCurrency,
+  fetchFxRates,
+  formatCurrency,
+  formatSignedCurrency,
+  normalizeCurrencyCode,
+} from "@/lib/currency";
+import {
+  type CachedMarketQuote,
+  MARKET_CACHE_MAX_AGE_MS,
+  getCachedFxRates,
+  getCachedQuotes,
+  getFxRateKeys,
+  upsertCachedFxRates,
+  upsertCachedQuotes,
+} from "@/lib/market-cache";
+import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuCheckboxItem,
@@ -94,6 +110,7 @@ interface Holding {
   name: string;
   isin: string | null;
   asset_type: string | null;
+  currency: string | null;
   quantity: number;
   purchase_price: number;
   fees: number;
@@ -110,12 +127,8 @@ interface ThesisContext {
   updateThesis: (id: string, patch: Partial<Thesis>) => void;
 }
 
-function fmt$(n: number) {
-  return n.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-  });
+function fmtMoney(n: number, currency: string) {
+  return formatCurrency(n, currency);
 }
 function fmtPct(n: number) {
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
@@ -192,6 +205,7 @@ const ALL_COLUMNS = [
   { key: "name", label: "Asset", align: "left" },
   { key: "assetType", label: "Type", align: "left" },
   { key: "qty", label: "Qty", align: "right" },
+  { key: "currency", label: "Currency", align: "left" },
   { key: "cur", label: "Current", align: "right" },
   { key: "buy", label: "Cost", align: "right" },
   { key: "total", label: "Value", align: "right" },
@@ -211,6 +225,7 @@ interface RowData {
   name: string;
   isin: string | null;
   qty: number;
+  currency: string;
   cur: number;
   buy: number;
   total: number;
@@ -227,9 +242,26 @@ interface LiveQuote {
   currentPrice: number | null;
   change1dPercent: number | null;
   ytdChangePercent: number | null;
+  currency?: string | null;
   sector?: string | null;
   assetType?: string | null;
   lastPriceUpdatedAt?: string | null;
+}
+
+function cachedQuoteEntriesToLiveQuotes(entries: Record<string, CachedMarketQuote>) {
+  return Object.entries(entries).reduce<Record<string, LiveQuote>>((acc, [ticker, quote]) => {
+    acc[ticker] = {
+      ticker,
+      currentPrice: quote.currentPrice,
+      change1dPercent: quote.change1dPercent ?? null,
+      ytdChangePercent: quote.ytdChangePercent ?? null,
+      currency: quote.currency,
+      sector: quote.sector,
+      assetType: quote.assetType,
+      lastPriceUpdatedAt: quote.lastPriceUpdatedAt,
+    };
+    return acc;
+  }, {});
 }
 
 type ExportValue = string | number | null;
@@ -638,6 +670,7 @@ const HOLDINGS_EXPORT_HEADERS = [
   "Ticker",
   "ISIN",
   "Type",
+  "Currency",
   "Qty",
   "Current",
   "Cost",
@@ -663,12 +696,10 @@ const TRANSACTION_EXPORT_HEADERS = [
   "Commission",
 ];
 
-function PerfCell({ value, money }: { value: number; money?: boolean }) {
+function PerfCell({ value, money, currency = "EUR" }: { value: number; money?: boolean; currency?: string }) {
   const Icon = value > 0 ? ArrowUp : value < 0 ? ArrowDown : Minus;
   const tone = value > 0 ? "text-positive" : value < 0 ? "text-negative" : "text-foreground-muted";
-  const text = money
-    ? `${value > 0 ? "+" : value < 0 ? "−" : ""}${fmt$(Math.abs(value))}`
-    : fmtPct(value);
+  const text = money ? formatSignedCurrency(value, currency) : fmtPct(value);
   return (
     <span
       className={`inline-flex items-center justify-end gap-1 font-mono text-[11px] tabular-nums ${tone}`}
@@ -688,10 +719,13 @@ export default function PortfolioDetailPage() {
     name: string;
     description: string | null;
     cash_value: number;
+    currency: string | null;
   } | null>(null);
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [loading, setLoading] = useState(true);
   const [liveQuotes, setLiveQuotes] = useState<Record<string, LiveQuote>>({});
+  const [fxRates, setFxRates] = useState<Record<string, number>>({});
+  const [marketReady, setMarketReady] = useState(false);
 
   const [sortBy, setSortBy] = useState<string>("total");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -736,20 +770,52 @@ export default function PortfolioDetailPage() {
   const [exportError, setExportError] = useState<string | null>(null);
   const columnModifierSelectRef = useRef(false);
 
+  const hydrateCachedMarketState = useCallback(
+    (nextHoldings: Holding[], nextPortfolioCurrency: string) => {
+      const symbols = Array.from(
+        new Set(nextHoldings.map((holding) => holding.ticker.toUpperCase()).filter(Boolean)),
+      );
+      if (symbols.length === 0) {
+        setLiveQuotes({});
+        setFxRates({});
+        return true;
+      }
+
+      const cachedQuotes = getCachedQuotes(symbols);
+      const cachedQuoteMap = cachedQuoteEntriesToLiveQuotes(cachedQuotes.entries);
+      const sourceCurrencies = nextHoldings.map(
+        (holding) => cachedQuoteMap[holding.ticker.toUpperCase()]?.currency ?? holding.currency,
+      );
+      const cachedFx = getCachedFxRates(getFxRateKeys(sourceCurrencies, [nextPortfolioCurrency]));
+
+      if (cachedQuotes.hasAll) setLiveQuotes(cachedQuoteMap);
+      if (cachedFx.hasAll) setFxRates(cachedFx.entries);
+
+      return cachedQuotes.hasAll && cachedFx.hasAll;
+    },
+    [],
+  );
+
   const load = useCallback(async () => {
     const [pRes, hRes] = await Promise.all([
       supabase
         .from("portfolios")
-        .select("id, name, description, cash_value")
+        .select("id, name, description, cash_value, currency")
         .eq("id", portfolioId!)
         .single(),
       supabase.from("holdings").select("*").eq("portfolio_id", portfolioId!),
     ]);
     if (pRes.error) toast.error("Failed to load portfolio");
     else setPortfolio(pRes.data);
-    if (!hRes.error) setHoldings(hRes.data || []);
+    if (!hRes.error) {
+      const nextHoldings = hRes.data || [];
+      const nextPortfolioCurrency = normalizeCurrencyCode(pRes.data?.currency);
+      const hasCachedMarketData = hydrateCachedMarketState(nextHoldings, nextPortfolioCurrency);
+      setHoldings(nextHoldings);
+      setMarketReady(nextHoldings.length === 0 || hasCachedMarketData);
+    }
     setLoading(false);
-  }, [portfolioId]);
+  }, [hydrateCachedMarketState, portfolioId]);
 
   const triggerGeographySync = useCallback(async () => {
     if (!portfolioId) return;
@@ -780,18 +846,25 @@ export default function PortfolioDetailPage() {
     saveLS(`binturong.columns.order.${portfolioId}`, colOrder);
   }, [colOrder, portfolioId]);
 
+  const portfolioCurrency = normalizeCurrencyCode(portfolio?.currency);
   const holdingsValue = useMemo(
     () =>
       holdings.reduce((s, h) => {
-        const livePrice = liveQuotes[h.ticker.toUpperCase()]?.currentPrice;
-        const current = livePrice ?? h.purchase_price;
-        return s + current * h.quantity;
+        const live = liveQuotes[h.ticker.toUpperCase()];
+        const current = live?.currentPrice ?? h.purchase_price;
+        const currency = live?.currency ?? h.currency ?? portfolioCurrency;
+        return s + convertCurrency(current * h.quantity, currency, portfolioCurrency, fxRates);
       }, 0),
-    [holdings, liveQuotes],
+    [fxRates, holdings, liveQuotes, portfolioCurrency],
   );
   const holdingsCost = useMemo(
-    () => holdings.reduce((s, h) => s + h.purchase_price * h.quantity, 0),
-    [holdings],
+    () =>
+      holdings.reduce(
+        (s, h) =>
+          s + convertCurrency(h.purchase_price * h.quantity, h.currency, portfolioCurrency, fxRates),
+        0,
+      ),
+    [fxRates, holdings, portfolioCurrency],
   );
   const cashValue = portfolio?.cash_value ?? 0;
   const totalValue = holdingsValue + cashValue;
@@ -803,8 +876,10 @@ export default function PortfolioDetailPage() {
     const r = holdings.map((h) => {
       const live = liveQuotes[h.ticker.toUpperCase()];
       const cur = live?.currentPrice ?? h.purchase_price;
-      const total = cur * h.quantity;
-      const gl = (cur - h.purchase_price) * h.quantity;
+      const currency = normalizeCurrencyCode(live?.currency ?? h.currency, portfolioCurrency);
+      const total = convertCurrency(cur * h.quantity, currency, portfolioCurrency, fxRates);
+      const cost = convertCurrency(h.purchase_price * h.quantity, h.currency, portfolioCurrency, fxRates);
+      const gl = total - cost;
       const weight = totalValue > 0 ? (total / totalValue) * 100 : 0;
       const perf1D = live?.change1dPercent ?? 0;
       const perfYTD = live?.ytdChangePercent ?? 0;
@@ -814,6 +889,7 @@ export default function PortfolioDetailPage() {
         name: h.name,
         isin: h.isin,
         qty: h.quantity,
+        currency,
         cur,
         buy: h.purchase_price,
         total,
@@ -839,7 +915,7 @@ export default function PortfolioDetailPage() {
       return (((av as number) ?? 0) - ((bv as number) ?? 0)) * dir;
     });
     return r;
-  }, [holdings, liveQuotes, totalValue, sortBy, sortDir]);
+  }, [fxRates, holdings, liveQuotes, portfolioCurrency, totalValue, sortBy, sortDir]);
 
   // Allocation data for charts
   const sectorData = useMemo(() => {
@@ -869,34 +945,76 @@ export default function PortfolioDetailPage() {
     );
     if (symbols.length === 0) {
       setLiveQuotes({});
+      setFxRates({});
+      setMarketReady(true);
       return;
     }
 
     let cancelled = false;
-    const fetchQuotes = async () => {
+    const cachedQuotes = getCachedQuotes(symbols);
+    const cachedQuoteMap = cachedQuoteEntriesToLiveQuotes(cachedQuotes.entries);
+    const cachedSourceCurrencies = holdings.map(
+      (holding) => cachedQuoteMap[holding.ticker.toUpperCase()]?.currency ?? holding.currency,
+    );
+    const cachedFx = getCachedFxRates(getFxRateKeys(cachedSourceCurrencies, [portfolioCurrency]));
+    const hasCompleteCache = cachedQuotes.hasAll && cachedFx.hasAll;
+
+    if (cachedQuotes.hasAll) setLiveQuotes(cachedQuoteMap);
+    if (cachedFx.hasAll) setFxRates(cachedFx.entries);
+    if (hasCompleteCache) setMarketReady(true);
+
+    const fetchQuotes = async (showErrorToast = false) => {
       try {
         const params = encodeURIComponent(symbols.join(","));
-        const res = await fetch(`${API_BASE_URL}/api/market/quotes?symbols=${params}`);
+        const quoteRequest = fetch(
+          `${API_BASE_URL}/api/market/quotes?symbols=${params}&currency=${portfolioCurrency}`,
+        );
+        const knownRatesRequest = fetchFxRates(
+          API_BASE_URL,
+          holdings.map((holding) => holding.currency),
+          portfolioCurrency,
+        );
+        const [res, knownRates] = await Promise.all([quoteRequest, knownRatesRequest]);
         if (!res.ok) throw new Error("Unable to fetch live quotes");
         const data = (await res.json()) as LiveQuote[];
         if (cancelled) return;
         const quoteMap = data.reduce<Record<string, LiveQuote>>((acc, quote) => {
-          acc[quote.ticker] = quote;
+          acc[quote.ticker.toUpperCase()] = quote;
           return acc;
         }, {});
+        upsertCachedQuotes(data);
         setLiveQuotes(quoteMap);
+        const quoteCurrencies = holdings.map(
+          (holding) => quoteMap[holding.ticker.toUpperCase()]?.currency ?? holding.currency,
+        );
+        const missingQuoteCurrencies = quoteCurrencies.filter((currency) =>
+          getFxRateKeys([currency], [portfolioCurrency]).some((key) => knownRates[key] == null),
+        );
+        const missingRates =
+          missingQuoteCurrencies.length > 0
+            ? await fetchFxRates(API_BASE_URL, missingQuoteCurrencies, portfolioCurrency)
+            : {};
+        const rates = { ...knownRates, ...missingRates };
+        upsertCachedFxRates(rates);
+        if (!cancelled) {
+          setFxRates(rates);
+          setMarketReady(true);
+        }
       } catch {
-        if (!cancelled) toast.error("Failed to refresh market prices");
+        if (!cancelled) {
+          if (!hasCompleteCache) setMarketReady(true);
+          if (showErrorToast) toast.error("Failed to refresh market prices");
+        }
       }
     };
 
-    fetchQuotes();
-    const intervalId = window.setInterval(fetchQuotes, 60_000);
+    if (cachedQuotes.shouldRefetch || cachedFx.shouldRefetch) void fetchQuotes(!hasCompleteCache);
+    const intervalId = window.setInterval(() => void fetchQuotes(false), MARKET_CACHE_MAX_AGE_MS);
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [holdings]);
+  }, [holdings, portfolioCurrency]);
 
   const visibleCols = colOrder.filter((k) => !hiddenCols.has(k));
   const holdingsSnapshotRows = useMemo<ExportRow[]>(() => {
@@ -906,6 +1024,7 @@ export default function PortfolioDetailPage() {
         Ticker: row.ticker,
         ISIN: row.isin ?? "",
         Type: row.assetType,
+        Currency: row.currency,
         Qty: row.qty,
         Current: row.cur,
         Cost: row.buy,
@@ -1313,6 +1432,7 @@ export default function PortfolioDetailPage() {
     const allocationRows = [...allocationExportRows, ...geographyRows];
     const portfolioSummary: ExportRow = {
       "Portfolio Name": portfolio?.name ?? "Portfolio",
+      Currency: portfolioCurrency,
       "Total Value": totalValue,
       Cash: cashValue,
       "Cost Basis": totalCost,
@@ -1334,7 +1454,7 @@ export default function PortfolioDetailPage() {
           exported_at: new Date().toISOString(),
           portfolio_name: portfolio?.name ?? "Portfolio",
           account_type: "Unknown",
-          currency: "USD",
+          currency: portfolioCurrency,
           date_range: dateRange,
         },
         portfolio: {
@@ -1443,20 +1563,26 @@ export default function PortfolioDetailPage() {
   const ROW_HEIGHT = 560;
 
   const KPIS = [
-    { label: "Total value", value: fmt$(totalValue) },
-    { label: "Cash", value: fmt$(cashValue), muted: cashValue === 0 },
-    { label: "Cost basis", value: fmt$(totalCost), hierarchy: "secondary" },
+    {
+      label: "Total value",
+      value: fmtMoney(totalValue, portfolioCurrency),
+      loading: !marketReady,
+    },
+    { label: "Cash", value: fmtMoney(cashValue, portfolioCurrency), muted: cashValue === 0 },
+    { label: "Cost basis", value: fmtMoney(totalCost, portfolioCurrency), hierarchy: "secondary" },
     {
       label: "Unrealized P/L",
-      value: totalPL === 0 ? "—" : fmt$(totalPL),
+      value: totalPL === 0 ? "—" : fmtMoney(totalPL, portfolioCurrency),
       tone: totalPL > 0 ? "positive" : totalPL < 0 ? "negative" : undefined,
       muted: totalPL === 0,
+      loading: !marketReady,
     },
     {
       label: "Return",
       value: returnPct === 0 ? "—" : fmtPct(returnPct),
       tone: returnPct > 0 ? "positive" : returnPct < 0 ? "negative" : undefined,
       muted: returnPct === 0,
+      loading: !marketReady,
     },
   ];
 
@@ -1520,19 +1646,23 @@ export default function PortfolioDetailPage() {
                     >
                       {kpi.label}
                     </dt>
-                    <dd
-                      className={`mt-1 truncate font-mono text-[clamp(18px,1.35vw,22px)] font-medium leading-none tabular-nums ${
-                        kpi.muted
-                          ? "text-foreground-muted"
-                          : kpi.tone === "positive"
-                            ? "text-positive"
-                            : kpi.tone === "negative"
-                              ? "text-negative"
-                              : "text-foreground"
-                      }`}
-                    >
-                      {kpi.value}
-                    </dd>
+                    {kpi.loading ? (
+                      <dd className="mt-1 h-[22px] w-28 animate-pulse rounded bg-surface-2" />
+                    ) : (
+                      <dd
+                        className={`mt-1 truncate font-mono text-[clamp(18px,1.35vw,22px)] font-medium leading-none tabular-nums ${
+                          kpi.muted
+                            ? "text-foreground-muted"
+                            : kpi.tone === "positive"
+                              ? "text-positive"
+                              : kpi.tone === "negative"
+                                ? "text-negative"
+                                : "text-foreground"
+                        }`}
+                      >
+                        {kpi.value}
+                      </dd>
+                    )}
                   </div>
                 ))}
               </dl>
@@ -1545,7 +1675,7 @@ export default function PortfolioDetailPage() {
               </div>
               <div className="h-1 shrink-0" />
               <div className="min-h-0 flex-1">
-                <PortfolioChart portfolioId={portfolioId} />
+                <PortfolioChart portfolioId={portfolioId} currency={portfolioCurrency} />
               </div>
             </div>
           </div>
@@ -1556,6 +1686,7 @@ export default function PortfolioDetailPage() {
               portfolioId={portfolioId!}
               sectorData={sectorData}
               assetTypeData={assetTypeData}
+              currency={portfolioCurrency}
             />
           </div>
         </div>
@@ -1936,22 +2067,27 @@ export default function PortfolioDetailPage() {
                                   {key === "assetType" && (
                                     <span className="text-foreground-muted">{r.assetType}</span>
                                   )}
+                                  {key === "currency" && (
+                                    <span className="font-mono text-[11px] tabular-nums text-foreground-muted">
+                                      {r.currency}
+                                    </span>
+                                  )}
                                   {key === "cur" && (
                                     <span className="font-mono text-[11px] tabular-nums">
-                                      {fmt$(r.cur)}
+                                      {fmtMoney(r.cur, r.currency)}
                                     </span>
                                   )}
                                   {key === "buy" && (
                                     <span className="font-mono text-[11px] tabular-nums text-foreground-muted">
-                                      {fmt$(r.buy)}
+                                      {fmtMoney(r.buy, r.currency)}
                                     </span>
                                   )}
                                   {key === "total" && (
                                     <span className="font-mono text-[11px] font-medium tabular-nums">
-                                      {fmt$(r.total)}
+                                      {fmtMoney(r.total, portfolioCurrency)}
                                     </span>
                                   )}
-                                  {key === "gl" && <PerfCell value={r.gl} money />}
+                                  {key === "gl" && <PerfCell value={r.gl} money currency={portfolioCurrency} />}
                                   {key === "weight" && (
                                     <span className="font-mono text-[11px] tabular-nums text-foreground-muted">
                                       {r.weight.toFixed(1)}%
@@ -2009,6 +2145,7 @@ export default function PortfolioDetailPage() {
             <TabsContent value="transactions" className="m-0 p-4">
               <TransactionHistoryTab
                 portfolioId={portfolioId!}
+                currency={portfolioCurrency}
                 searchQuery={transactionSearch}
                 dateRange={transactionDateRange}
                 onDeleted={() => load()}
@@ -2210,6 +2347,7 @@ export default function PortfolioDetailPage() {
           open={addHoldingOpen}
           onOpenChange={setAddHoldingOpen}
           portfolioId={portfolioId!}
+          portfolioCurrency={portfolioCurrency}
           onAdded={() => {
             setAddHoldingOpen(false);
             void triggerGeographySync();
@@ -2224,7 +2362,7 @@ export default function PortfolioDetailPage() {
                 {cashAction === "deposit" ? "Deposit cash" : "Withdraw cash"}
               </DialogTitle>
               <DialogDescription>
-                Current cash balance: <span className="font-mono">{fmt$(cashValue)}</span>
+                Current cash balance: <span className="font-mono">{fmtMoney(cashValue, portfolioCurrency)}</span>
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-3">
@@ -2279,6 +2417,7 @@ export default function PortfolioDetailPage() {
               if (!open) setEditingHolding(null);
             }}
             holding={editingHolding}
+            portfolioCurrency={portfolioCurrency}
             onUpdated={() => {
               setEditingHolding(null);
               void triggerGeographySync();

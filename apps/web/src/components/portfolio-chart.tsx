@@ -24,6 +24,7 @@ import { InfinityLoop } from "@/components/loading-ui/infinity";
 import { TextShimmer } from "@/components/loading-ui/text-shimmer";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { formatCurrency, normalizeCurrencyCode } from "@/lib/currency";
 import nodeIconBlack from "../../../../Node_assets/hexagon/node-logo-icon-black.svg";
 import nodeIconWhite from "../../../../Node_assets/hexagon/node-logo-icon-white.svg";
 
@@ -50,6 +51,7 @@ export interface PortfolioChartPoint {
 interface PortfolioChartProps {
   data?: PortfolioChartPoint[];
   portfolioId?: string;
+  currency?: string;
 }
 
 type Mode = "value" | "simple" | "twr";
@@ -116,11 +118,9 @@ const BENCHMARK_COLORS: Record<string, string> = {
 };
 const ACTIVE_BENCHMARKS_STORAGE_PREFIX = "portfolio-chart:active-benchmarks";
 
-function fmtValue(n: number, mode: Mode) {
+function fmtValue(n: number, mode: Mode, currency: string) {
   if (mode === "value") {
-    return n.toLocaleString("en-US", {
-      style: "currency",
-      currency: "USD",
+    return formatCurrency(n, currency, {
       maximumFractionDigits: 0,
     });
   }
@@ -700,7 +700,8 @@ function ExpandableBenchmarkSearch({
   );
 }
 
-export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
+export function PortfolioChart({ data, portfolioId, currency = "EUR" }: PortfolioChartProps) {
+  const displayCurrency = normalizeCurrencyCode(currency);
   const [range, setRange] = useState<Range>("ALL");
   const [mode, setMode] = useState<Mode>("value");
   const [view, setView] = useState<View>("line");
@@ -1092,7 +1093,7 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
                   transition={pillTransition}
                 />
               )}
-              <span className="relative z-10">{item === "line" ? "Line" : "Bars (returns)"}</span>
+              <span className="relative z-10">{item === "line" ? "Trend" : "Performance"}</span>
             </button>
           ))}
         </div>
@@ -1109,26 +1110,42 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
                 ["simple", "Return"],
                 ["twr", "TWR"],
               ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                role="tab"
-                aria-selected={mode === id}
-                onClick={() => setMode(id)}
-                className={`relative rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                  mode === id ? "text-background" : "text-foreground-muted hover:text-foreground"
-                } isolate`}
-              >
-                {mode === id && (
-                  <motion.span
-                    layoutId="portfolio-chart-mode-pill"
-                    className="pointer-events-none absolute inset-0 z-0 rounded-full bg-foreground"
-                    transition={pillTransition}
-                  />
-                )}
-                <span className="relative z-10">{label}</span>
-              </button>
-            ))}
+            ).map(([id, label]) => {
+              const modeButton = (
+                <button
+                  key={id}
+                  role="tab"
+                  aria-selected={mode === id}
+                  onClick={() => setMode(id)}
+                  className={`relative rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                    mode === id ? "text-background" : "text-foreground-muted hover:text-foreground"
+                  } isolate`}
+                >
+                  {mode === id && (
+                    <motion.span
+                      layoutId="portfolio-chart-mode-pill"
+                      className="pointer-events-none absolute inset-0 z-0 rounded-full bg-foreground"
+                      transition={pillTransition}
+                    />
+                  )}
+                  <span className="relative z-10">{label}</span>
+                </button>
+              );
+
+              if (id !== "twr") return modeButton;
+
+              return (
+                <TooltipProvider key={id} delayDuration={150}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>{modeButton}</TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-64 text-center">
+                      Time-Weighted Return. Excludes cash movements to focus on the quality of
+                      decision making.
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              );
+            })}
           </div>
         )}
 
@@ -1273,7 +1290,7 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
               tickMargin={8}
               width={72}
               tick={{ fill: "var(--foreground-muted)", fontSize: 10 }}
-              tickFormatter={(value: number) => fmtValue(value, mode)}
+              tickFormatter={(value: number) => fmtValue(value, mode, displayCurrency)}
             />
             <ChartTooltip
               cursor={{ stroke: "var(--chart-accent)", strokeOpacity: 0.4, strokeDasharray: "3 3" }}
@@ -1287,7 +1304,7 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
                     })
                   }
                   formatter={(value: unknown, name: unknown) =>
-                    `${fmtValue(value as number, mode)} - ${benchmarkLabelFromName(name, visibleBenchmarks)}`
+                    `${fmtValue(value as number, mode, displayCurrency)} - ${benchmarkLabelFromName(name, visibleBenchmarks)}`
                   }
                   indicator="dot"
                 />
@@ -1331,8 +1348,8 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
 
       {hasVisibleBenchmarks && (
         <div className="shrink-0 border-t border-hairline pt-2 text-xs leading-none text-foreground-muted">
-          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-            <div className="flex min-w-0 flex-1 flex-wrap items-center justify-center gap-x-4 gap-y-1.5">
+          <div className="relative flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+            <div className="flex min-w-0 flex-wrap items-center justify-center gap-x-4 gap-y-1.5">
               <div className="flex items-center gap-1.5">
                 <span className="h-2.5 w-2.5 rounded-full bg-[var(--chart-accent)]" />
                 <span>Portfolio</span>
@@ -1352,7 +1369,7 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
                         current.filter((item) => item.ticker !== benchmark.ticker),
                       )
                     }
-                    className="rounded-full p-0.5 text-foreground-muted hover:bg-surface-2 hover:text-foreground"
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-hairline bg-surface-2/80 text-foreground-muted shadow-sm transition-colors hover:border-foreground/30 hover:bg-surface-2 hover:text-foreground"
                   >
                     <X className="h-3 w-3" />
                   </button>
@@ -1362,7 +1379,7 @@ export function PortfolioChart({ data, portfolioId }: PortfolioChartProps) {
             <button
               type="button"
               onClick={() => setActiveBenchmarks([])}
-              className="shrink-0 rounded-full px-2 py-1 text-xs text-foreground-muted hover:bg-surface-2 hover:text-foreground"
+              className="shrink-0 rounded-full border border-hairline bg-surface-2/80 px-2.5 py-1 text-xs text-foreground-muted shadow-sm transition-colors hover:border-foreground/30 hover:bg-surface-2 hover:text-foreground sm:absolute sm:right-0"
             >
               Clear all
             </button>

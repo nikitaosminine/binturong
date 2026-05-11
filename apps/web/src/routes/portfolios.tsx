@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { MoreHorizontal, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -16,41 +16,85 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { OrbitRing } from "@/components/loading-ui/orbit-ring";
+import {
+  DEFAULT_PORTFOLIO_CURRENCY,
+  convertCurrency,
+  fetchFxRates,
+  formatCurrency,
+  formatSignedCurrency,
+  normalizeCurrencyCode,
+} from "@/lib/currency";
+import {
+  MARKET_CACHE_MAX_AGE_MS,
+  getCachedFxRates,
+  getCachedQuotes,
+  getFxRateKeys,
+  upsertCachedFxRates,
+  upsertCachedQuotes,
+} from "@/lib/market-cache";
 
 interface Holding {
   id: string;
   ticker: string;
   quantity: number;
   purchase_price: number;
+  currency: string | null;
 }
 
 interface Portfolio {
   id: string;
   name: string;
   description: string | null;
+  currency: string | null;
   created_at: string;
   cash_value: number | null;
   holdings: Holding[];
 }
 
-function fmt$(n: number) {
-  return n.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-  });
+interface LiveQuote {
+  ticker: string;
+  currentPrice: number | null;
+  currency: string | null;
+}
+
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL ??
+  (import.meta.env.PROD
+    ? "https://binturong-api.nikita-osminine.workers.dev"
+    : "http://localhost:8787");
+
+function fmtMoney(n: number, currency: string) {
+  return formatCurrency(n, currency);
 }
 
 function fmtPct(n: number) {
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
 }
 
-function holdingsValue(holdings: Holding[]) {
-  return holdings.reduce((s, h) => s + (MOCK_PRICES[h.ticker] ?? h.purchase_price) * h.quantity, 0);
+function holdingsValue(
+  holdings: Holding[],
+  portfolioCurrency: string,
+  quotes: Record<string, LiveQuote>,
+  fxRates: Record<string, number>,
+) {
+  return holdings.reduce((s, h) => {
+    const quote = quotes[h.ticker.toUpperCase()];
+    const price = quote?.currentPrice ?? MOCK_PRICES[h.ticker] ?? h.purchase_price;
+    const currency = quote?.currency ?? h.currency ?? portfolioCurrency;
+    return s + convertCurrency(price * h.quantity, currency, portfolioCurrency, fxRates);
+  }, 0);
 }
 
-function holdingsCost(holdings: Holding[]) {
-  return holdings.reduce((s, h) => s + h.purchase_price * h.quantity, 0);
+function holdingsCost(
+  holdings: Holding[],
+  portfolioCurrency: string,
+  fxRates: Record<string, number>,
+) {
+  return holdings.reduce(
+    (s, h) =>
+      s + convertCurrency(h.purchase_price * h.quantity, h.currency, portfolioCurrency, fxRates),
+    0,
+  );
 }
 
 function StatCard({
@@ -58,11 +102,13 @@ function StatCard({
   value,
   tone = "neutral",
   muted = false,
+  loading = false,
 }: {
   label: string;
   value: string;
   tone?: "positive" | "negative" | "neutral";
   muted?: boolean;
+  loading?: boolean;
 }) {
   const cls =
     tone === "positive"
@@ -73,11 +119,15 @@ function StatCard({
   return (
     <div className="rounded-lg border border-border/50 bg-card p-4">
       <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{label}</div>
-      <div
-        className={`mt-1.5 text-lg font-semibold tabular-nums font-mono ${muted ? "text-foreground/70" : cls}`}
-      >
-        {value}
-      </div>
+      {loading ? (
+        <div className="mt-2 h-5 w-24 animate-pulse rounded bg-surface-2" />
+      ) : (
+        <div
+          className={`mt-1.5 text-lg font-semibold tabular-nums font-mono ${muted ? "text-foreground/70" : cls}`}
+        >
+          {value}
+        </div>
+      )}
     </div>
   );
 }
@@ -106,15 +156,22 @@ function PortfolioCard({
   onClick,
   onEdit,
   onDelete,
+  liveQuotes,
+  fxRates,
+  marketReady,
 }: {
   portfolio: Portfolio;
   onClick: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  liveQuotes: Record<string, LiveQuote>;
+  fxRates: Record<string, number>;
+  marketReady: boolean;
 }) {
+  const currency = normalizeCurrencyCode(portfolio.currency);
   const cash = portfolio.cash_value ?? 0;
-  const val = holdingsValue(portfolio.holdings) + cash;
-  const cost = holdingsCost(portfolio.holdings) + cash;
+  const val = holdingsValue(portfolio.holdings, currency, liveQuotes, fxRates) + cash;
+  const cost = holdingsCost(portfolio.holdings, currency, fxRates) + cash;
   const pl = val - cost;
   const plPct = cost > 0 ? (pl / cost) * 100 : 0;
   const positive = pl >= 0;
@@ -192,10 +249,19 @@ function PortfolioCard({
 
       <div className="mt-3 flex items-end justify-between gap-2">
         <div>
-          <div className="text-[17px] font-semibold font-mono tabular-nums">{fmt$(val)}</div>
-          <div className={`text-[11px] font-mono ${positive ? "text-positive" : "text-negative"}`}>
-            {fmt$(pl)} · {fmtPct(plPct)}
-          </div>
+          {marketReady ? (
+            <>
+              <div className="text-[17px] font-semibold font-mono tabular-nums">{fmtMoney(val, currency)}</div>
+              <div className={`text-[11px] font-mono ${positive ? "text-positive" : "text-negative"}`}>
+                {formatSignedCurrency(pl, currency)} · {fmtPct(plPct)}
+              </div>
+            </>
+          ) : (
+            <div className="space-y-2">
+              <div className="h-5 w-28 animate-pulse rounded bg-surface-2" />
+              <div className="h-3 w-20 animate-pulse rounded bg-surface-2" />
+            </div>
+          )}
         </div>
         <Sparkline points={sparkPoints} positive={positive} />
       </div>
@@ -248,8 +314,46 @@ export default function PortfoliosPage() {
   const [manualOpen, setManualOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editingPortfolio, setEditingPortfolio] = useState<Portfolio | null>(null);
+  const [liveQuotes, setLiveQuotes] = useState<Record<string, LiveQuote>>({});
+  const [fxRates, setFxRates] = useState<Record<string, number>>({});
+  const [marketReady, setMarketReady] = useState(false);
 
-  const fetchPortfolios = async () => {
+  const hydrateCachedMarketState = useCallback((nextPortfolios: Portfolio[]) => {
+    const tickers = Array.from(
+      new Set(
+        nextPortfolios.flatMap((portfolio) =>
+          portfolio.holdings.map((holding) => holding.ticker.toUpperCase()),
+        ),
+      ),
+    ).filter(Boolean);
+    if (tickers.length === 0) {
+      setLiveQuotes({});
+      setFxRates({});
+      return true;
+    }
+
+    const cachedQuotes = getCachedQuotes(tickers);
+    const sourceCurrencies = nextPortfolios.flatMap((portfolio) => [
+      portfolio.currency,
+      ...portfolio.holdings.map(
+        (holding) => cachedQuotes.entries[holding.ticker.toUpperCase()]?.currency ?? holding.currency,
+      ),
+    ]);
+    const targetCurrencies = Array.from(
+      new Set([
+        DEFAULT_PORTFOLIO_CURRENCY,
+        ...nextPortfolios.map((portfolio) => normalizeCurrencyCode(portfolio.currency)),
+      ]),
+    );
+    const cachedFx = getCachedFxRates(getFxRateKeys(sourceCurrencies, targetCurrencies));
+
+    if (cachedQuotes.hasAll) setLiveQuotes(cachedQuotes.entries);
+    if (cachedFx.hasAll) setFxRates(cachedFx.entries);
+
+    return cachedQuotes.hasAll && cachedFx.hasAll;
+  }, []);
+
+  const fetchPortfolios = useCallback(async () => {
     const { data, error } = await supabase
       .from("portfolios")
       .select("*, holdings(*)")
@@ -257,19 +361,124 @@ export default function PortfoliosPage() {
     if (error) {
       toast.error("Failed to load portfolios");
     } else {
-      setPortfolios((data as Portfolio[]) || []);
+      const nextPortfolios = (data as Portfolio[]) || [];
+      const hasCachedMarketData = hydrateCachedMarketState(nextPortfolios);
+      setPortfolios(nextPortfolios);
+      setMarketReady(
+        !nextPortfolios.some((portfolio) => portfolio.holdings.length > 0) || hasCachedMarketData,
+      );
     }
     setLoading(false);
-  };
+  }, [hydrateCachedMarketState]);
 
   useEffect(() => {
-    fetchPortfolios();
-  }, []);
+    void fetchPortfolios();
+  }, [fetchPortfolios]);
+
+  useEffect(() => {
+    const tickers = Array.from(
+      new Set(portfolios.flatMap((portfolio) => portfolio.holdings.map((holding) => holding.ticker.toUpperCase()))),
+    ).filter(Boolean);
+    if (tickers.length === 0) {
+      setLiveQuotes({});
+      setFxRates({});
+      setMarketReady(true);
+      return;
+    }
+
+    let cancelled = false;
+    const cachedQuotes = getCachedQuotes(tickers);
+    const cachedSourceCurrencies = portfolios.flatMap((portfolio) => [
+      portfolio.currency,
+      ...portfolio.holdings.map(
+        (holding) => cachedQuotes.entries[holding.ticker.toUpperCase()]?.currency ?? holding.currency,
+      ),
+    ]);
+    const targetCurrencies = Array.from(
+      new Set([
+        DEFAULT_PORTFOLIO_CURRENCY,
+        ...portfolios.map((portfolio) => normalizeCurrencyCode(portfolio.currency)),
+      ]),
+    );
+    const cachedFx = getCachedFxRates(getFxRateKeys(cachedSourceCurrencies, targetCurrencies));
+    const hasCompleteCache = cachedQuotes.hasAll && cachedFx.hasAll;
+
+    if (cachedQuotes.hasAll) setLiveQuotes(cachedQuotes.entries);
+    if (cachedFx.hasAll) setFxRates(cachedFx.entries);
+    if (hasCompleteCache) setMarketReady(true);
+
+    const refreshMarketData = async () => {
+      try {
+        const quoteRequest = fetch(
+          `${API_BASE_URL}/api/market/quotes?symbols=${encodeURIComponent(tickers.join(","))}`,
+        );
+        const knownSourceCurrencies = portfolios.flatMap((portfolio) => [
+          portfolio.currency,
+          ...portfolio.holdings.map((holding) => holding.currency),
+        ]);
+        const knownRateEntriesRequest = Promise.all(
+          targetCurrencies.map((target) => fetchFxRates(API_BASE_URL, knownSourceCurrencies, target)),
+        );
+        const [response, knownRateEntries] = await Promise.all([
+          quoteRequest,
+          knownRateEntriesRequest,
+        ]);
+        if (!response.ok) throw new Error("Quote request failed");
+        const quotes = (await response.json()) as LiveQuote[];
+        if (cancelled) return;
+        const quoteMap = quotes.reduce<Record<string, LiveQuote>>((acc, quote) => {
+          acc[quote.ticker.toUpperCase()] = quote;
+          return acc;
+        }, {});
+        upsertCachedQuotes(quotes);
+        setLiveQuotes(quoteMap);
+        const sourceCurrencies = portfolios.flatMap((portfolio) => [
+          portfolio.currency,
+          ...portfolio.holdings.map(
+            (holding) => quoteMap[holding.ticker.toUpperCase()]?.currency ?? holding.currency,
+          ),
+        ]);
+        const knownRates = Object.assign({}, ...knownRateEntries);
+        const missingSourceCurrencies = sourceCurrencies.filter((currency) =>
+          getFxRateKeys([currency], targetCurrencies).some((key) => knownRates[key] == null),
+        );
+        const missingRateEntries =
+          missingSourceCurrencies.length > 0
+            ? await Promise.all(
+                targetCurrencies.map((target) =>
+                  fetchFxRates(API_BASE_URL, missingSourceCurrencies, target),
+                ),
+              )
+            : [];
+        if (!cancelled) {
+          const nextFxRates = Object.assign({}, knownRates, ...missingRateEntries);
+          upsertCachedFxRates(nextFxRates);
+          setFxRates(nextFxRates);
+          setMarketReady(true);
+        }
+      } catch {
+        if (!cancelled) {
+          if (!hasCompleteCache) setMarketReady(true);
+        }
+      }
+    };
+
+    if (cachedQuotes.shouldRefetch || cachedFx.shouldRefetch) void refreshMarketData();
+    const intervalId = window.setInterval(
+      () => void refreshMarketData(),
+      MARKET_CACHE_MAX_AGE_MS,
+    );
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [portfolios]);
 
   const onCreated = () => {
     setCsvOpen(false);
     setManualOpen(false);
-    fetchPortfolios();
+    void fetchPortfolios();
   };
   const handleEditPortfolio = (portfolio: Portfolio) => {
     setEditingPortfolio(portfolio);
@@ -296,20 +505,42 @@ export default function PortfoliosPage() {
     }
 
     toast.success("Portfolio deleted");
-    fetchPortfolios();
+    void fetchPortfolios();
   };
 
   const totalValue = useMemo(
-    () => portfolios.reduce((s, p) => s + holdingsValue(p.holdings) + (p.cash_value ?? 0), 0),
-    [portfolios],
+    () =>
+      portfolios.reduce((s, p) => {
+        const currency = normalizeCurrencyCode(p.currency);
+        const portfolioValue =
+          holdingsValue(p.holdings, currency, liveQuotes, fxRates) + (p.cash_value ?? 0);
+        return s + convertCurrency(portfolioValue, currency, DEFAULT_PORTFOLIO_CURRENCY, fxRates);
+      }, 0),
+    [fxRates, liveQuotes, portfolios],
   );
   const totalCash = useMemo(
-    () => portfolios.reduce((s, p) => s + (p.cash_value ?? 0), 0),
-    [portfolios],
+    () =>
+      portfolios.reduce(
+        (s, p) =>
+          s +
+          convertCurrency(
+            p.cash_value ?? 0,
+            normalizeCurrencyCode(p.currency),
+            DEFAULT_PORTFOLIO_CURRENCY,
+            fxRates,
+          ),
+        0,
+      ),
+    [fxRates, portfolios],
   );
   const totalCost = useMemo(
-    () => portfolios.reduce((s, p) => s + holdingsCost(p.holdings) + (p.cash_value ?? 0), 0),
-    [portfolios],
+    () =>
+      portfolios.reduce((s, p) => {
+        const currency = normalizeCurrencyCode(p.currency);
+        const portfolioCost = holdingsCost(p.holdings, currency, fxRates) + (p.cash_value ?? 0);
+        return s + convertCurrency(portfolioCost, currency, DEFAULT_PORTFOLIO_CURRENCY, fxRates);
+      }, 0),
+    [fxRates, portfolios],
   );
   const totalPL = totalValue - totalCost;
   const returnPct = totalCost > 0 ? (totalPL / totalCost) * 100 : 0;
@@ -346,18 +577,24 @@ export default function PortfoliosPage() {
 
       {portfolios.length > 0 && (
         <div className="grid grid-cols-5 gap-3">
-          <StatCard label="Total value" value={fmt$(totalValue)} />
-          <StatCard label="Cash value" value={fmt$(totalCash)} muted />
-          <StatCard label="Total cost" value={fmt$(totalCost)} muted />
+          <StatCard
+            label="Total value"
+            value={fmtMoney(totalValue, DEFAULT_PORTFOLIO_CURRENCY)}
+            loading={!marketReady}
+          />
+          <StatCard label="Cash value" value={fmtMoney(totalCash, DEFAULT_PORTFOLIO_CURRENCY)} muted />
+          <StatCard label="Total cost" value={fmtMoney(totalCost, DEFAULT_PORTFOLIO_CURRENCY)} muted />
           <StatCard
             label="Unrealized P/L"
-            value={fmt$(totalPL)}
+            value={fmtMoney(totalPL, DEFAULT_PORTFOLIO_CURRENCY)}
             tone={totalPL >= 0 ? "positive" : "negative"}
+            loading={!marketReady}
           />
           <StatCard
             label="Return"
             value={fmtPct(returnPct)}
             tone={returnPct >= 0 ? "positive" : "negative"}
+            loading={!marketReady}
           />
         </div>
       )}
@@ -391,6 +628,9 @@ export default function PortfoliosPage() {
               onClick={() => navigate(`/portfolios/${p.id}`)}
               onEdit={() => handleEditPortfolio(p)}
               onDelete={() => handleDeletePortfolio(p)}
+              liveQuotes={liveQuotes}
+              fxRates={fxRates}
+              marketReady={marketReady}
             />
           ))}
           <AddCard onNewCsv={() => setCsvOpen(true)} onNewManual={() => setManualOpen(true)} />
@@ -406,7 +646,7 @@ export default function PortfoliosPage() {
           if (!open) setEditingPortfolio(null);
         }}
         portfolio={editingPortfolio}
-        onSaved={fetchPortfolios}
+        onSaved={() => void fetchPortfolios()}
       />
     </div>
   );
