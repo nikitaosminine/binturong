@@ -52,6 +52,11 @@ function parseSymbols(raw: string | null): string[] {
   );
 }
 
+function normalizeCurrencyCode(value: unknown): string | null {
+  const currency = String(value ?? "").trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(currency) ? currency : null;
+}
+
 const YAHOO_HEADERS = {
   "User-Agent": "Mozilla/5.0",
   Accept: "application/json",
@@ -101,6 +106,7 @@ async function searchYahooAssets(query: string): Promise<AssetSearchResult[]> {
       name: quote.shortname || quote.longname || quote.symbol || "",
       exchange: quote.exchange || quote.fullExchangeName || "N/A",
       assetType: quote.quoteType || "N/A",
+      currency: normalizeCurrencyCode(quote.currency),
     }))
     .slice(0, 10);
 }
@@ -155,6 +161,37 @@ function normalizeDateString(raw: string): string {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) throw new Error(`Invalid transaction date: ${raw}`);
   return toDateString(parsed);
+}
+
+function computeDailyTwrByDate(
+  snapshots: Array<{ date: string; total_value: number | string | null }>,
+  flowByDate: Map<string, number>,
+): Map<string, number> {
+  let twrIndex = 1;
+  let previousTotalValue: number | null = null;
+  const twrByDate = new Map<string, number>();
+
+  for (const snap of snapshots) {
+    const date = String(snap.date);
+    const totalValue = Number(snap.total_value ?? 0);
+
+    if (previousTotalValue == null) {
+      previousTotalValue = totalValue;
+      twrByDate.set(date, 0);
+      continue;
+    }
+
+    if (previousTotalValue > 0) {
+      const externalFlow = flowByDate.get(date) ?? 0;
+      const periodReturn = (totalValue - externalFlow - previousTotalValue) / previousTotalValue;
+      if (Number.isFinite(periodReturn)) twrIndex *= 1 + periodReturn;
+    }
+
+    previousTotalValue = totalValue;
+    twrByDate.set(date, (twrIndex - 1) * 100);
+  }
+
+  return twrByDate;
 }
 
 function isTransactionSide(value: unknown): value is TransactionSide {
@@ -214,6 +251,7 @@ interface YahooSearchQuote {
   exchange?: string;
   fullExchangeName?: string;
   quoteType?: string;
+  currency?: string | null;
 }
 
 interface YahooSearchResponse {
@@ -223,8 +261,10 @@ interface YahooSearchResponse {
 interface YahooQuoteItem {
   currentPrice: number | null;
   change1dPercent: number | null;
+  currency: string | null;
   sector: string | null;
   assetType: string | null;
+  lastPriceUpdatedAt: string | null;
 }
 
 interface YahooChartResponse {
@@ -233,8 +273,10 @@ interface YahooChartResponse {
       meta?: {
         regularMarketPrice?: number | null;
         previousClose?: number | null;
+        currency?: string | null;
         instrumentType?: string | null;
         quoteType?: string | null;
+        regularMarketTime?: number | null;
       };
       timestamp?: number[];
       indicators?: {
@@ -292,8 +334,11 @@ interface YahooQuoteResponse {
       regularMarketPrice?: number | null;
       regularMarketPreviousClose?: number | null;
       regularMarketChangePercent?: number | null;
+      currency?: string | null;
+      financialCurrency?: string | null;
       quoteType?: string | null;
       typeDisp?: string | null;
+      regularMarketTime?: number | null;
     }>;
   };
 }
@@ -378,6 +423,7 @@ interface AssetSearchResult {
   name: string;
   exchange: string;
   assetType: string;
+  currency: string | null;
 }
 
 type AgentToolName =
@@ -444,6 +490,7 @@ interface MarketQuotesResult {
     ytdChangePercent: number | null;
     sector: string;
     assetType: string | null;
+    lastPriceUpdatedAt: string | null;
   }>;
 }
 
@@ -1366,15 +1413,23 @@ async function getPortfolioGeography(
   const client = db(env);
   const { data: holdingsData, error: holdingsError } = await client
     .from("holdings")
-    .select("id,ticker,name,asset_type,quantity,purchase_price,fees,geography_checked_at")
+    .select("id,ticker,name,asset_type,currency,quantity,purchase_price,fees,geography_checked_at")
     .eq("portfolio_id", portfolioId);
   if (holdingsError) throw new Error(`geography holdings lookup failed: ${holdingsError.message}`);
+  const { data: portfolioData, error: portfolioError } = await client
+    .from("portfolios")
+    .select("currency")
+    .eq("id", portfolioId)
+    .single();
+  if (portfolioError) throw new Error(`geography portfolio lookup failed: ${portfolioError.message}`);
+  const portfolioCurrency = normalizeCurrencyCode(portfolioData?.currency) ?? "EUR";
 
   const holdings = (holdingsData ?? []).map((row) => ({
     id: String(row.id),
     ticker: String(row.ticker).toUpperCase(),
     name: String(row.name ?? row.ticker),
     asset_type: row.asset_type == null ? null : String(row.asset_type),
+    currency: normalizeCurrencyCode(row.currency) ?? portfolioCurrency,
     quantity: Number(row.quantity ?? 0),
     purchase_price: Number(row.purchase_price ?? 0),
     fees: Number(row.fees ?? 0),
@@ -1401,6 +1456,10 @@ async function getPortfolioGeography(
 
   const quotesBySymbol =
     options.useQuotes === false ? {} : await getQuotesResilient(holdings.map((holding) => holding.ticker));
+  const fxRates = await getFxRates(
+    holdings.map((holding) => quotesBySymbol[holding.ticker]?.currency ?? holding.currency),
+    portfolioCurrency,
+  );
   const allocationsByHolding = new Map<string, Array<Record<string, unknown>>>();
   for (const allocation of allocationsData ?? []) {
     const holdingId = String(allocation.holding_id);
@@ -1437,7 +1496,11 @@ async function getPortfolioGeography(
   for (const holding of holdings) {
     const quote = quotesBySymbol[holding.ticker];
     const price = quote?.currentPrice ?? holding.purchase_price;
-    const value = Math.max(0, price * holding.quantity + holding.fees);
+    const sourceCurrency = quote?.currency ?? holding.currency;
+    const value = Math.max(
+      0,
+      convertCurrencyValue(price * holding.quantity + holding.fees, sourceCurrency, portfolioCurrency, fxRates),
+    );
     securitiesValue += value;
 
     const allocations = allocationsByHolding.get(holding.id) ?? [];
@@ -1512,6 +1575,11 @@ async function getPortfolioGeography(
   };
 }
 
+function yahooTimeToIso(value: number | null | undefined): string | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+  return new Date(value * 1000).toISOString();
+}
+
 async function getQuotesFromBatch(symbols: string[]): Promise<Record<string, YahooQuoteItem>> {
   if (symbols.length === 0) return {};
 
@@ -1538,8 +1606,10 @@ async function getQuotesFromBatch(symbols: string[]): Promise<Record<string, Yah
     acc[symbol] = {
       currentPrice,
       change1dPercent,
+      currency: normalizeCurrencyCode(row.currency) ?? normalizeCurrencyCode(row.financialCurrency),
       sector: null,
       assetType: normalizeYahooAssetType(row.quoteType, row.typeDisp),
+      lastPriceUpdatedAt: yahooTimeToIso(row.regularMarketTime),
     };
     return acc;
   }, {});
@@ -1572,15 +1642,19 @@ async function getQuoteFromChart(symbol: string): Promise<YahooQuoteItem> {
     return {
       currentPrice: latestClose,
       change1dPercent,
+      currency: normalizeCurrencyCode(series?.meta?.currency),
       sector: null,
       assetType,
+      lastPriceUpdatedAt: yahooTimeToIso(series?.meta?.regularMarketTime),
     };
   } catch {
     return {
       currentPrice: null,
       change1dPercent: null,
+      currency: null,
       sector: null,
       assetType: null,
+      lastPriceUpdatedAt: null,
     };
   }
 }
@@ -1601,6 +1675,58 @@ async function getQuotesResilient(symbols: string[]): Promise<Record<string, Yah
     );
     return Object.fromEntries(fallbackEntries);
   }
+}
+
+function currencyRateKey(from: string, to: string): string {
+  return `${from}:${to}`;
+}
+
+async function getFxRates(sourceCurrencies: string[], targetCurrency: string): Promise<Record<string, number>> {
+  const target = normalizeCurrencyCode(targetCurrency) ?? "EUR";
+  const sources = Array.from(
+    new Set(sourceCurrencies.map((currency) => normalizeCurrencyCode(currency) ?? target)),
+  ).filter((currency) => currency !== target);
+  if (sources.length === 0) return {};
+
+  const directSymbols = sources.map((source) => `${source}${target}=X`);
+  const directQuotes = await getQuotesResilient(directSymbols);
+  const rates: Record<string, number> = {};
+  const missing: string[] = [];
+
+  for (const source of sources) {
+    const price = directQuotes[`${source}${target}=X`]?.currentPrice;
+    if (price != null && Number.isFinite(price) && price > 0) {
+      rates[currencyRateKey(source, target)] = price;
+    } else {
+      missing.push(source);
+    }
+  }
+
+  if (missing.length > 0) {
+    const inverseSymbols = missing.map((source) => `${target}${source}=X`);
+    const inverseQuotes = await getQuotesResilient(inverseSymbols);
+    for (const source of missing) {
+      const price = inverseQuotes[`${target}${source}=X`]?.currentPrice;
+      if (price != null && Number.isFinite(price) && price > 0) {
+        rates[currencyRateKey(source, target)] = 1 / price;
+      }
+    }
+  }
+
+  return rates;
+}
+
+function convertCurrencyValue(
+  amount: number,
+  fromCurrency: string | null | undefined,
+  toCurrency: string,
+  rates: Record<string, number>,
+) {
+  const from = normalizeCurrencyCode(fromCurrency) ?? normalizeCurrencyCode(toCurrency) ?? "EUR";
+  const to = normalizeCurrencyCode(toCurrency) ?? "EUR";
+  if (from === to) return amount;
+  const rate = rates[currencyRateKey(from, to)];
+  return Number.isFinite(rate) && rate > 0 ? amount * rate : amount;
 }
 
 async function getYtdChangePercent(symbol: string): Promise<number | null> {
@@ -2183,8 +2309,13 @@ async function buildBenchmarkPortfolioSummary(
   };
 }
 
-async function getAssetTypesFromBatch(symbols: string[]): Promise<Map<string, string>> {
-  if (symbols.length === 0) return new Map();
+async function getAssetMetadataFromBatch(symbols: string[]): Promise<{
+  typeByTicker: Map<string, string>;
+  currencyByTicker: Map<string, string>;
+}> {
+  if (symbols.length === 0) {
+    return { typeByTicker: new Map(), currencyByTicker: new Map() };
+  }
 
   const url = new URL("https://query1.finance.yahoo.com/v7/finance/quote");
   url.searchParams.set("symbols", symbols.join(","));
@@ -2192,13 +2323,16 @@ async function getAssetTypesFromBatch(symbols: string[]): Promise<Map<string, st
   const data = await fetchJson<YahooQuoteResponse>(url.toString());
   const rows = data.quoteResponse?.result ?? [];
   const typeByTicker = new Map<string, string>();
+  const currencyByTicker = new Map<string, string>();
   for (const row of rows) {
     const symbol = row.symbol?.toUpperCase();
     if (!symbol) continue;
     const assetType = normalizeYahooAssetType(row.quoteType, row.typeDisp);
     if (assetType) typeByTicker.set(symbol, assetType);
+    const currency = normalizeCurrencyCode(row.currency) ?? normalizeCurrencyCode(row.financialCurrency);
+    if (currency) currencyByTicker.set(symbol, currency);
   }
-  return typeByTicker;
+  return { typeByTicker, currencyByTicker };
 }
 
 async function getPricesByTicker(
@@ -2208,12 +2342,13 @@ async function getPricesByTicker(
 ): Promise<{
   pricesByTicker: Map<string, Map<string, number>>;
   typeByTicker: Map<string, string>;
+  currencyByTicker: Map<string, string>;
 }> {
   const client = db(env);
   const allPriceRows: Array<{ yahoo_ticker: string; date: string; closing_price: number }> = [];
-  const typeByTicker = await getAssetTypesFromBatch(tickers).catch((error) => {
-    console.error("asset type fetch failed", error);
-    return new Map<string, string>();
+  const { typeByTicker, currencyByTicker } = await getAssetMetadataFromBatch(tickers).catch((error) => {
+    console.error("asset metadata fetch failed", error);
+    return { typeByTicker: new Map<string, string>(), currencyByTicker: new Map<string, string>() };
   });
   const entries = await Promise.all(
     tickers.map(async (ticker) => {
@@ -2240,7 +2375,7 @@ async function getPricesByTicker(
       onConflict: "yahoo_ticker,date",
     });
   }
-  return { pricesByTicker: new Map(entries), typeByTicker };
+  return { pricesByTicker: new Map(entries), typeByTicker, currencyByTicker };
 }
 
 function normalizeYahooAssetType(...values: Array<string | null | undefined>): string | null {
@@ -2390,6 +2525,7 @@ async function rebuildCurrentHoldings(
   env: Env,
   portfolioId: string,
   typeByTicker: Map<string, string> = new Map(),
+  currencyByTicker: Map<string, string> = new Map(),
 ): Promise<void> {
   const client = db(env);
   const txns = await loadPortfolioTransactions(env, portfolioId);
@@ -2448,6 +2584,7 @@ async function rebuildCurrentHoldings(
     quantity: lot.quantity,
     fees: 0,
     asset_type: typeByTicker.get(lot.ticker.toUpperCase()) ?? "Other",
+    currency: currencyByTicker.get(lot.ticker.toUpperCase()) ?? "EUR",
   }));
   if (holdingRows.length > 0) {
     const { data: insertedHoldings, error: insertError } = await client
@@ -2526,8 +2663,8 @@ async function recomputeSnapshots(env: Env, portfolioId: string): Promise<void> 
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
   const tickers = Array.from(new Set(txns.map((txn) => txn.yahoo_ticker).filter(Boolean))) as string[];
-  const { pricesByTicker, typeByTicker } = await getPricesByTicker(env, tickers, firstDate);
-  await rebuildCurrentHoldings(env, portfolioId, typeByTicker);
+  const { pricesByTicker, typeByTicker, currencyByTicker } = await getPricesByTicker(env, tickers, firstDate);
+  await rebuildCurrentHoldings(env, portfolioId, typeByTicker, currencyByTicker);
   const snapshots: Array<{
     portfolio_id: string;
     date: string;
@@ -2566,7 +2703,7 @@ async function appendTodaySnapshot(env: Env, portfolioId: string): Promise<void>
   today.setUTCHours(0, 0, 0, 0);
   const date = toDateString(today);
   const tickers = Array.from(new Set(txns.map((txn) => txn.yahoo_ticker).filter(Boolean))) as string[];
-  const { pricesByTicker, typeByTicker } = await getPricesByTicker(
+  const { pricesByTicker, typeByTicker, currencyByTicker } = await getPricesByTicker(
     env,
     tickers,
     new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
@@ -2579,7 +2716,7 @@ async function appendTodaySnapshot(env: Env, portfolioId: string): Promise<void>
     },
     { onConflict: "portfolio_id,date" },
   );
-  await rebuildCurrentHoldings(env, portfolioId, typeByTicker);
+  await rebuildCurrentHoldings(env, portfolioId, typeByTicker, currencyByTicker);
 }
 
 async function enqueueDailySnapshotsForClosedMarkets(env: Env, scheduledTime: number): Promise<void> {
@@ -2890,6 +3027,7 @@ async function runMarketQuotesTool(input: { tickers: string[] }): Promise<Market
         ytdChangePercent: ytdChanges[index] ?? null,
         sector: sectorsBySymbol[ticker] ?? quote?.sector ?? "Other",
         assetType: quote?.assetType ?? null,
+        lastPriceUpdatedAt: quote?.lastPriceUpdatedAt ?? null,
       };
     }),
   };
@@ -3473,7 +3611,7 @@ ${JSON.stringify(holdingsPromptPayload, null, 2)}`;
         return json(data);
       }
       if (method === "POST") {
-        const body = await request.json();
+        const body = (await request.json()) as Record<string, unknown>;
         const { data, error } = await db(env).from("portfolios").insert(body).select();
         if (error) return json({ error: error.message }, 500);
         return json(data, 201);
@@ -3489,7 +3627,7 @@ ${JSON.stringify(holdingsPromptPayload, null, 2)}`;
         return json(data);
       }
       if (method === "PUT") {
-        const body = await request.json();
+        const body = (await request.json()) as Record<string, unknown>;
         const { data, error } = await db(env).from("portfolios").update(body).eq("id", id).select();
         if (error) return json({ error: error.message }, 500);
         return json(data);
@@ -3815,25 +3953,7 @@ ${JSON.stringify(holdingsPromptPayload, null, 2)}`;
         flowByDate.set(date, (flowByDate.get(date) ?? 0) + Number(txn.net_amount ?? 0));
       }
 
-      let twrIndex = 1;
-      let subPeriodStartValue: number | null = null;
-      const twrByDate = new Map<string, number>();
-      for (const snap of snapshots) {
-        const date = String(snap.date);
-        const totalValue = Number(snap.total_value ?? 0);
-        const flow = flowByDate.get(date) ?? 0;
-        if (subPeriodStartValue == null) {
-          subPeriodStartValue = totalValue;
-          twrByDate.set(date, 0);
-          continue;
-        }
-        if (flow !== 0 && subPeriodStartValue > 0) {
-          const valueBeforeFlow = totalValue - flow;
-          twrIndex *= 1 + (valueBeforeFlow - subPeriodStartValue) / subPeriodStartValue;
-          subPeriodStartValue = totalValue;
-        }
-        twrByDate.set(date, (twrIndex - 1) * 100);
-      }
+      const twrByDate = computeDailyTwrByDate(snapshots, flowByDate);
 
       let runningDeposits = 0;
       const series = snapshots.map((snap) => {
@@ -3852,6 +3972,48 @@ ${JSON.stringify(holdingsPromptPayload, null, 2)}`;
       });
 
       return json({ series });
+    }
+
+    const lastPricesMatch = pathname.match(/^\/api\/portfolios\/([^/]+)\/last-prices$/);
+    if (lastPricesMatch && method === "GET") {
+      const portfolioId = lastPricesMatch[1];
+      const accessError = await requirePortfolioAccess(request, env, portfolioId);
+      if (accessError) return accessError;
+
+      const { data: holdings, error: holdingsError } = await db(env)
+        .from("holdings")
+        .select("ticker")
+        .eq("portfolio_id", portfolioId);
+      if (holdingsError) return json({ error: holdingsError.message }, 500);
+
+      const tickers = Array.from(
+        new Set(
+          (holdings ?? [])
+            .map((row) => String(row.ticker ?? "").trim().toUpperCase())
+            .filter(Boolean),
+        ),
+      );
+      if (tickers.length === 0) return json([]);
+
+      const results = await Promise.all(
+        tickers.map(async (ticker) => {
+          const { data, error } = await db(env)
+            .from("price_history")
+            .select("date, closing_price")
+            .eq("yahoo_ticker", ticker)
+            .order("date", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (error || !data) return { ticker, date: null, close: null };
+          return {
+            ticker,
+            date: String(data.date),
+            close: Number(data.closing_price),
+          };
+        }),
+      );
+
+      return json(results);
     }
 
     const geographyMatch = pathname.match(/^\/api\/portfolios\/([^/]+)\/geography$/);
@@ -3934,7 +4096,7 @@ ${JSON.stringify(holdingsPromptPayload, null, 2)}`;
         return json(data);
       }
       if (method === "POST") {
-        const body = await request.json();
+        const body = (await request.json()) as Record<string, unknown>;
         const { data, error } = await db(env).from("holdings").insert(body).select();
         if (error) return json({ error: error.message }, 500);
         const portfolioIds = Array.from(
@@ -3959,12 +4121,14 @@ ${JSON.stringify(holdingsPromptPayload, null, 2)}`;
 
     if (method === "GET" && pathname === "/api/market/quotes") {
       const symbols = parseSymbols(url.searchParams.get("symbols"));
+      const fallbackCurrency = normalizeCurrencyCode(url.searchParams.get("currency"));
       if (symbols.length === 0) return json([]);
       const [quotesBySymbol, ytdChanges, sectorsBySymbol] = await Promise.all([
         getQuotesResilient(symbols),
         Promise.all(symbols.map((symbol) => getYtdChangePercent(symbol))),
         getSectorsForSymbols(symbols),
       ]);
+      const fetchedAt = new Date().toISOString();
 
       const data = symbols.map((symbol, i) => {
         const quote =
@@ -3972,16 +4136,20 @@ ${JSON.stringify(holdingsPromptPayload, null, 2)}`;
           ({
             currentPrice: null,
             change1dPercent: null,
+            currency: null,
             sector: null,
             assetType: null,
+            lastPriceUpdatedAt: null,
           } satisfies YahooQuoteItem);
         return {
           ticker: symbol,
           currentPrice: quote.currentPrice,
           change1dPercent: quote.change1dPercent,
+          currency: quote.currency ?? fallbackCurrency,
           ytdChangePercent: ytdChanges[i],
           sector: sectorsBySymbol[symbol] ?? quote.sector ?? "Other",
           assetType: quote.assetType,
+          lastPriceUpdatedAt: quote.lastPriceUpdatedAt ?? fetchedAt,
         };
       });
 
@@ -3992,7 +4160,7 @@ ${JSON.stringify(holdingsPromptPayload, null, 2)}`;
     if (holdingMatch) {
       const id = holdingMatch[1];
       if (method === "PUT") {
-        const body = await request.json();
+        const body = (await request.json()) as Record<string, unknown>;
         const { data, error } = await db(env).from("holdings").update(body).eq("id", id).select();
         if (error) return json({ error: error.message }, 500);
         const portfolioIds = Array.from(
