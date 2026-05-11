@@ -37,6 +37,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { formatCurrency, normalizeCurrencyCode } from "@/lib/currency";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_URL ??
@@ -85,6 +86,7 @@ interface Transaction {
 
 interface Props {
   portfolioId: string;
+  currency: string;
   searchQuery: string;
   dateRange: TransactionDateRange;
   onDeleted?: () => void;
@@ -117,13 +119,9 @@ const COLUMNS: Array<{
   { key: "commission", label: "Commission", align: "right" },
 ];
 
-function formatAmount(value: number | null): string {
+function formatAmount(value: number | null, currency: string): string {
   if (value == null) return "-";
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-  }).format(value);
+  return formatCurrency(value, currency);
 }
 
 function toExportRows(transactions: Transaction[]): TransactionExportRow[] {
@@ -148,6 +146,7 @@ async function authHeaders() {
 
 export function TransactionHistoryTab({
   portfolioId,
+  currency,
   searchQuery,
   dateRange,
   onDeleted,
@@ -161,6 +160,7 @@ export function TransactionHistoryTab({
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(25);
+  const displayCurrency = normalizeCurrencyCode(currency);
 
   const fetchTransactions = useCallback(async () => {
     setLoading(true);
@@ -348,10 +348,10 @@ export function TransactionHistoryTab({
                       (transaction.net_amount ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"
                     }`}
                   >
-                    {formatAmount(transaction.net_amount)}
+                    {formatAmount(transaction.net_amount, displayCurrency)}
                   </TableCell>
                   <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                    {transaction.commission !== 0 ? formatAmount(transaction.commission) : "-"}
+                    {transaction.commission !== 0 ? formatAmount(transaction.commission, displayCurrency) : "-"}
                   </TableCell>
                   <TableCell>
                     <button

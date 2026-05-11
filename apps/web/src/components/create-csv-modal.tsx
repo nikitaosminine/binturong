@@ -14,12 +14,15 @@ import { supabase } from "@/integrations/supabase/client";
 import { MOCK_STOCKS, CSV_TEMPLATE } from "@/lib/mock-data";
 import Papa from "papaparse";
 import { toast } from "sonner";
+import { CurrencySelect } from "@/components/currency-select";
+import { DEFAULT_PORTFOLIO_CURRENCY, normalizeCurrencyCode } from "@/lib/currency";
 
 interface AssetSearchResult {
   ticker: string;
   name: string;
   exchange: string;
   assetType: string;
+  currency: string | null;
 }
 
 interface ParsedCsvRow extends Record<string, string> {
@@ -148,6 +151,7 @@ interface Props {
 export function CreateCsvModal({ open, onOpenChange, onCreated }: Props) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [currency, setCurrency] = useState(DEFAULT_PORTFOLIO_CURRENCY);
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -191,7 +195,12 @@ export function CreateCsvModal({ open, onOpenChange, onCreated }: Props) {
 
       const { data: portfolio, error: pErr } = await supabase
         .from("portfolios")
-        .insert({ name: name.trim(), description: description.trim() || null, user_id: user.id })
+        .insert({
+          name: name.trim(),
+          description: description.trim() || null,
+          currency,
+          user_id: user.id,
+        })
         .select()
         .single();
 
@@ -271,6 +280,7 @@ export function CreateCsvModal({ open, onOpenChange, onCreated }: Props) {
           ticker: resolvedTicker,
           name: resolved?.name || stock?.name || row.Ticker || "Unknown",
           asset_type: resolved?.assetType || null,
+          currency: normalizeCurrencyCode(resolved?.currency, currency),
           isin: csvIsin || stock?.isin || null,
           purchase_date: row.__date,
           purchase_price: row.__price,
@@ -285,6 +295,7 @@ export function CreateCsvModal({ open, onOpenChange, onCreated }: Props) {
       toast.success("Portfolio created successfully");
       setName("");
       setDescription("");
+      setCurrency(DEFAULT_PORTFOLIO_CURRENCY);
       setFile(null);
       onCreated();
     } catch (err: any) {
@@ -317,6 +328,10 @@ export function CreateCsvModal({ open, onOpenChange, onCreated }: Props) {
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Currency</Label>
+            <CurrencySelect value={currency} onValueChange={setCurrency} />
           </div>
 
           <div>

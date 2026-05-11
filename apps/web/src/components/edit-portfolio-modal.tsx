@@ -5,11 +5,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { CurrencySelect } from "@/components/currency-select";
+import { DEFAULT_PORTFOLIO_CURRENCY, normalizeCurrencyCode } from "@/lib/currency";
 
 interface PortfolioLike {
   id: string;
   name: string;
   description: string | null;
+  currency?: string | null;
 }
 
 interface Props {
@@ -22,12 +25,14 @@ interface Props {
 export function EditPortfolioModal({ open, onOpenChange, portfolio, onSaved }: Props) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [currency, setCurrency] = useState(DEFAULT_PORTFOLIO_CURRENCY);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!open || !portfolio) return;
     setName(portfolio.name);
     setDescription(portfolio.description ?? "");
+    setCurrency(normalizeCurrencyCode(portfolio.currency));
   }, [open, portfolio]);
 
   const handleSubmit = async () => {
@@ -39,6 +44,7 @@ export function EditPortfolioModal({ open, onOpenChange, portfolio, onSaved }: P
       .update({
         name: name.trim(),
         description: description.trim() || null,
+        currency,
       })
       .eq("id", portfolio.id);
 
@@ -56,13 +62,13 @@ export function EditPortfolioModal({ open, onOpenChange, portfolio, onSaved }: P
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Edit portfolio</DialogTitle>
           <DialogDescription>Update portfolio details.</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-3">
             <div className="space-y-1.5">
               <Label>Portfolio name *</Label>
               <Input placeholder="My Portfolio" value={name} onChange={(e) => setName(e.target.value)} />
@@ -70,6 +76,10 @@ export function EditPortfolioModal({ open, onOpenChange, portfolio, onSaved }: P
             <div className="space-y-1.5">
               <Label>Description</Label>
               <Input placeholder="Optional" value={description} onChange={(e) => setDescription(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Currency</Label>
+              <CurrencySelect value={currency} onValueChange={setCurrency} />
             </div>
           </div>
 

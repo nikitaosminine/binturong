@@ -168,6 +168,7 @@ export type Database = {
           country_code: string | null;
           country_name: string | null;
           created_at: string;
+          currency: string | null;
           fees: number;
           geography_checked_at: string | null;
           geography_confidence: number;
@@ -187,6 +188,7 @@ export type Database = {
           country_code?: string | null;
           country_name?: string | null;
           created_at?: string;
+          currency?: string | null;
           fees?: number;
           geography_checked_at?: string | null;
           geography_confidence?: number;
@@ -206,6 +208,7 @@ export type Database = {
           country_code?: string | null;
           country_name?: string | null;
           created_at?: string;
+          currency?: string | null;
           fees?: number;
           geography_checked_at?: string | null;
           geography_confidence?: number;
@@ -386,6 +389,7 @@ export type Database = {
         Row: {
           cash_value: number;
           created_at: string;
+          currency: string;
           description: string | null;
           id: string;
           name: string;
@@ -396,6 +400,7 @@ export type Database = {
         Insert: {
           cash_value?: number;
           created_at?: string;
+          currency?: string;
           description?: string | null;
           id?: string;
           name: string;
@@ -406,6 +411,7 @@ export type Database = {
         Update: {
           cash_value?: number;
           created_at?: string;
+          currency?: string;
           description?: string | null;
           id?: string;
           name?: string;

@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { InfinityLoop } from "@/components/loading-ui/infinity";
+import { formatCurrency, normalizeCurrencyCode } from "@/lib/currency";
 
 export type AllocationDatum = { name: string; value: number };
 
@@ -39,6 +40,7 @@ type Props = {
   portfolioId: string;
   sectorData: AllocationDatum[];
   assetTypeData: AllocationDatum[];
+  currency: string;
 };
 
 type View = "classic" | "geography";
@@ -126,10 +128,8 @@ async function authHeaders() {
   return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
 }
 
-function fmtMoney(value: number) {
-  return value.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
+function fmtMoney(value: number, currency: string) {
+  return formatCurrency(value, currency, {
     maximumFractionDigits: 0,
   });
 }
@@ -329,11 +329,13 @@ function GeographyAllocation({
   loading,
   onResearchPending,
   researchEnqueueing,
+  currency,
 }: {
   data: GeographyResponse | null;
   loading: boolean;
   onResearchPending: () => void;
   researchEnqueueing: boolean;
+  currency: string;
 }) {
   const countries = useMemo(() => data?.countries ?? [], [data]);
   const [otherOpen, setOtherOpen] = useState(false);
@@ -446,7 +448,7 @@ function GeographyAllocation({
             />
           </div>
           <span className="w-16 text-right text-[10px] tabular-nums text-foreground-muted">
-            {fmtMoney(country.value)}
+            {fmtMoney(country.value, currency)}
           </span>
         </div>
       </li>
@@ -517,7 +519,7 @@ function GeographyAllocation({
                               />
                             </div>
                             <span className="w-16 text-right text-[10px] tabular-nums text-foreground-muted">
-                              {fmtMoney(country.value)}
+                              {fmtMoney(country.value, currency)}
                             </span>
                           </div>
                         </button>
@@ -547,7 +549,7 @@ function GeographyAllocation({
                                   />
                                 </div>
                                 <span className="w-14 text-right text-[10px] tabular-nums text-foreground-muted">
-                                  {fmtMoney(minorCountry.value)}
+                                  {fmtMoney(minorCountry.value, currency)}
                                 </span>
                               </div>
                             </div>
@@ -568,7 +570,8 @@ function GeographyAllocation({
   );
 }
 
-export function AllocationCard({ portfolioId, sectorData, assetTypeData }: Props) {
+export function AllocationCard({ portfolioId, sectorData, assetTypeData, currency }: Props) {
+  const displayCurrency = normalizeCurrencyCode(currency);
   const [view, setView] = useState<View>("classic");
   const [geography, setGeography] = useState<GeographyResponse | null>(null);
   const [geoLoading, setGeoLoading] = useState(false);
@@ -747,6 +750,7 @@ export function AllocationCard({ portfolioId, sectorData, assetTypeData }: Props
           loading={geoLoading && !geography}
           onResearchPending={() => void enqueueGeographyResearch()}
           researchEnqueueing={geoEnqueueing}
+          currency={displayCurrency}
         />
       )}
     </div>

@@ -15,11 +15,13 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { normalizeCurrencyCode } from "@/lib/currency";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   portfolioId: string;
+  portfolioCurrency: string;
   onAdded: () => void;
 }
 
@@ -28,14 +30,16 @@ interface AssetSearchResult {
   name: string;
   exchange: string;
   assetType: string;
+  currency: string | null;
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? "https://binturong-api.nikita-osminine.workers.dev" : "http://localhost:8787");
 
-export function AddHoldingModal({ open, onOpenChange, portfolioId, onAdded }: Props) {
+export function AddHoldingModal({ open, onOpenChange, portfolioId, portfolioCurrency, onAdded }: Props) {
   const [ticker, setTicker] = useState("");
   const [name, setName] = useState("");
   const [assetType, setAssetType] = useState("");
+  const [currency, setCurrency] = useState(portfolioCurrency);
   const [isin, setIsin] = useState("");
   const [date, setDate] = useState<Date | undefined>(undefined);
   const [price, setPrice] = useState("");
@@ -50,6 +54,7 @@ export function AddHoldingModal({ open, onOpenChange, portfolioId, onAdded }: Pr
     setTicker("");
     setName("");
     setAssetType("");
+    setCurrency(portfolioCurrency);
     setIsin("");
     setDate(undefined);
     setPrice("");
@@ -110,6 +115,7 @@ export function AddHoldingModal({ open, onOpenChange, portfolioId, onAdded }: Pr
     setTicker(s.ticker);
     setName(s.name);
     setAssetType(s.assetType);
+    setCurrency(normalizeCurrencyCode(s.currency, portfolioCurrency));
     setIsin("");
     setSearchResults([]);
     setShowSearch(false);
@@ -127,6 +133,7 @@ export function AddHoldingModal({ open, onOpenChange, portfolioId, onAdded }: Pr
         ticker: ticker.toUpperCase(),
         name: name || ticker.toUpperCase(),
         asset_type: assetType || null,
+        currency: normalizeCurrencyCode(currency, portfolioCurrency),
         isin: isin || null,
         purchase_date: format(date, "yyyy-MM-dd"),
         purchase_price: parseFloat(price) || 0,
@@ -182,7 +189,7 @@ export function AddHoldingModal({ open, onOpenChange, portfolioId, onAdded }: Pr
                     </div>
                     <div className="text-right text-xs text-muted-foreground">
                       <div>{s.exchange}</div>
-                      <div>{s.assetType}</div>
+                      <div>{s.currency ? `${s.assetType} · ${s.currency}` : s.assetType}</div>
                     </div>
                   </button>
                 ))}

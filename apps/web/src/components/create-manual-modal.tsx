@@ -7,6 +7,8 @@ import { Plus, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { MOCK_STOCKS } from "@/lib/mock-data";
 import { toast } from "sonner";
+import { CurrencySelect } from "@/components/currency-select";
+import { DEFAULT_PORTFOLIO_CURRENCY } from "@/lib/currency";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
@@ -35,6 +37,7 @@ const emptyHolding = (): Holding => ({
 export function CreateManualModal({ open, onOpenChange, onCreated }: Props) {
   const [portfolioName, setPortfolioName] = useState("");
   const [description, setDescription] = useState("");
+  const [currency, setCurrency] = useState(DEFAULT_PORTFOLIO_CURRENCY);
   const [holdings, setHoldings] = useState<Holding[]>([emptyHolding()]);
   const [loading, setLoading] = useState(false);
   const [searchResults, setSearchResults] = useState<typeof MOCK_STOCKS>([]);
@@ -89,7 +92,12 @@ export function CreateManualModal({ open, onOpenChange, onCreated }: Props) {
 
       const { data: portfolio, error: pErr } = await supabase
         .from("portfolios")
-        .insert({ name: portfolioName.trim(), description: description.trim() || null, user_id: user.id })
+        .insert({
+          name: portfolioName.trim(),
+          description: description.trim() || null,
+          currency,
+          user_id: user.id,
+        })
         .select()
         .single();
       if (pErr) throw pErr;
@@ -99,6 +107,7 @@ export function CreateManualModal({ open, onOpenChange, onCreated }: Props) {
         ticker: h.ticker.toUpperCase(),
         name: h.name || h.ticker,
         isin: h.isin,
+        currency,
         purchase_date: h.date ? format(h.date, "yyyy-MM-dd") : "",
         purchase_price: parseFloat(h.price) || 0,
         quantity: parseFloat(h.quantity) || 0,
@@ -111,6 +120,7 @@ export function CreateManualModal({ open, onOpenChange, onCreated }: Props) {
       toast.success("Portfolio created successfully");
       setPortfolioName("");
       setDescription("");
+      setCurrency(DEFAULT_PORTFOLIO_CURRENCY);
       setHoldings([emptyHolding()]);
       onCreated();
     } catch (err: any) {
@@ -136,6 +146,10 @@ export function CreateManualModal({ open, onOpenChange, onCreated }: Props) {
             <div className="space-y-1.5">
               <Label>Description</Label>
               <Input placeholder="Optional" value={description} onChange={(e) => setDescription(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Currency</Label>
+              <CurrencySelect value={currency} onValueChange={setCurrency} />
             </div>
           </div>
 

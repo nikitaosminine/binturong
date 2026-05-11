@@ -10,6 +10,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { format, parseISO } from "date-fns";
 import { cn } from "@/lib/utils";
+import { CurrencySelect } from "@/components/currency-select";
+import { normalizeCurrencyCode } from "@/lib/currency";
 
 interface Holding {
   id: string;
@@ -18,6 +20,7 @@ interface Holding {
   isin: string | null;
   quantity: number;
   purchase_price: number;
+  currency?: string | null;
   fees: number;
   purchase_date: string;
 }
@@ -26,10 +29,11 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   holding: Holding;
+  portfolioCurrency: string;
   onUpdated: () => void;
 }
 
-export function EditHoldingModal({ open, onOpenChange, holding, onUpdated }: Props) {
+export function EditHoldingModal({ open, onOpenChange, holding, portfolioCurrency, onUpdated }: Props) {
   const [ticker, setTicker]   = useState(holding.ticker);
   const [name, setName]       = useState(holding.name);
   const [isin, setIsin]       = useState(holding.isin ?? "");
@@ -37,6 +41,7 @@ export function EditHoldingModal({ open, onOpenChange, holding, onUpdated }: Pro
     try { return parseISO(holding.purchase_date); } catch { return undefined; }
   });
   const [price, setPrice]     = useState(String(holding.purchase_price));
+  const [currency, setCurrency] = useState(normalizeCurrencyCode(holding.currency, portfolioCurrency));
   const [quantity, setQty]    = useState(String(holding.quantity));
   const [fees, setFees]       = useState(String(holding.fees));
   const [loading, setLoading] = useState(false);
@@ -80,6 +85,7 @@ export function EditHoldingModal({ open, onOpenChange, holding, onUpdated }: Pro
           ticker: ticker.toUpperCase(),
           name: name || ticker,
           isin: isin || null,
+          currency: normalizeCurrencyCode(currency, portfolioCurrency),
           purchase_date: format(date, "yyyy-MM-dd"),
           purchase_price: parseFloat(price) || 0,
           quantity: parseFloat(quantity) || 0,
@@ -161,6 +167,11 @@ export function EditHoldingModal({ open, onOpenChange, holding, onUpdated }: Pro
             <div>
               <Label className="text-xs">Purchase price *</Label>
               <Input type="number" step="0.01" placeholder="0.00" value={price} onChange={(e) => setPrice(e.target.value)} />
+            </div>
+
+            <div>
+              <Label className="text-xs">Currency</Label>
+              <CurrencySelect value={currency} onValueChange={setCurrency} />
             </div>
 
             {/* Quantity */}
