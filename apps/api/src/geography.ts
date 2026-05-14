@@ -1,4 +1,17 @@
 export type GeographySource = "isin" | "yahoo_profile" | "llm_web" | "unknown";
+export type GeographyResearchJobStatus = "queued" | "running" | "completed" | "failed";
+
+export interface GeographyResearchJobState {
+  status?: GeographyResearchJobStatus | string | null;
+  startedAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface CachedGeographyAssetState {
+  assetType?: string | null;
+  geographySource?: GeographySource | string | null;
+  allocationSources?: Array<GeographySource | string | null | undefined>;
+}
 
 export interface GeographyAllocationInput {
   country_code?: unknown;
@@ -373,6 +386,56 @@ export function countryFromIsin(isin: string | null | undefined): {
 export function isFundLikeAsset(assetType: string | null | undefined, name = "", ticker = ""): boolean {
   const value = `${assetType ?? ""} ${name} ${ticker}`.toLowerCase();
   return /\betf\b|exchange traded fund|mutual\s*fund|\bfund\b|\bucits\b|\buc\.?etf\b/.test(value);
+}
+
+export function shouldInferDirectGeographyFromIsin(
+  assetType: string | null | undefined,
+  name = "",
+  ticker = "",
+): boolean {
+  return !isFundLikeAsset(assetType, name, ticker);
+}
+
+export function isValidFundGeographySource(source: GeographySource | string | null | undefined): boolean {
+  return source === "llm_web";
+}
+
+export function hasValidFundGeographyAllocation(
+  sources: Array<GeographySource | string | null | undefined>,
+): boolean {
+  return sources.some((source) => isValidFundGeographySource(source));
+}
+
+export function shouldEnqueueGeographyResearchJob(
+  job: GeographyResearchJobState | null | undefined,
+  options: { force?: boolean; now?: Date; staleMs?: number } = {},
+): boolean {
+  if (options.force) return true;
+  if (!job) return true;
+  if (job.status === "queued" || job.status === "failed" || job.status === "completed") return true;
+  if (job.status !== "running") return true;
+
+  const staleMs = options.staleMs ?? 15 * 60 * 1000;
+  const nowMs = options.now?.getTime() ?? Date.now();
+  const activityAt = job.startedAt ?? job.updatedAt;
+  if (!activityAt) return true;
+  const activityMs = Date.parse(activityAt);
+  return !Number.isFinite(activityMs) || nowMs - activityMs >= staleMs;
+}
+
+export function assetTypeWithCachedGeography(
+  fetchedType: string | null | undefined,
+  cached: CachedGeographyAssetState | null | undefined,
+): string {
+  if (fetchedType && fetchedType !== "Other") return fetchedType;
+  const hasCachedFundLikeGeography =
+    isFundLikeAsset(cached?.assetType) ||
+    cached?.geographySource === "llm_web" ||
+    Boolean(cached?.allocationSources?.some((source) => source === "llm_web"));
+  if (hasCachedFundLikeGeography) {
+    return cached?.assetType && cached.assetType !== "Other" ? cached.assetType : "ETF";
+  }
+  return fetchedType ?? cached?.assetType ?? "Other";
 }
 
 export function normalizeGeographyAllocations(

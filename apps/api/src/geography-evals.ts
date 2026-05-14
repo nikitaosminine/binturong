@@ -1,8 +1,12 @@
 import {
+  assetTypeWithCachedGeography,
   countryFromIsin,
   diagnoseGeographyAllocations,
+  hasValidFundGeographyAllocation,
   isFundLikeAsset,
   normalizeGeographyAllocations,
+  shouldInferDirectGeographyFromIsin,
+  shouldEnqueueGeographyResearchJob,
 } from "./geography";
 
 export const GEOGRAPHY_EVAL_FIXTURES = [
@@ -117,6 +121,57 @@ export const GEOGRAPHY_EVAL_FIXTURES = [
   {
     name: "ETF/fund detection includes UCITS labels",
     pass: isFundLikeAsset("ETF", "AMUNDI PEA NASDAQ-100 UCITS ETF", "PANX.PA"),
+  },
+  {
+    name: "PAASI ETF does not use ISIN domicile geography",
+    pass:
+      countryFromIsin("FR0013412012")?.code === "FR" &&
+      shouldInferDirectGeographyFromIsin("ETF", "AM.PEA AS.EM.SCREEN.UC.EUR C/D", "PAASI.PA") === false,
+  },
+  {
+    name: "ETF ISIN allocations do not count as valid fund geography",
+    pass: hasValidFundGeographyAllocation(["isin"]) === false,
+  },
+  {
+    name: "ETF Grok allocations count as valid fund geography",
+    pass: hasValidFundGeographyAllocation(["llm_web"]) === true,
+  },
+  {
+    name: "Cached Grok geography preserves ETF classification when metadata is Other",
+    pass:
+      assetTypeWithCachedGeography("Other", {
+        assetType: "Other",
+        geographySource: "llm_web",
+        allocationSources: ["llm_web"],
+      }) === "ETF",
+  },
+  {
+    name: "Existing queued geography jobs are resent",
+    pass: shouldEnqueueGeographyResearchJob({ status: "queued" }) === true,
+  },
+  {
+    name: "Fresh running geography jobs are not duplicated",
+    pass:
+      shouldEnqueueGeographyResearchJob(
+        { status: "running", startedAt: "2026-05-14T10:00:00.000Z" },
+        { now: new Date("2026-05-14T10:05:00.000Z") },
+      ) === false,
+  },
+  {
+    name: "Stale running geography jobs are requeued",
+    pass:
+      shouldEnqueueGeographyResearchJob(
+        { status: "running", startedAt: "2026-05-14T10:00:00.000Z" },
+        { now: new Date("2026-05-14T10:20:00.000Z") },
+      ) === true,
+  },
+  {
+    name: "Failed geography jobs are requeued",
+    pass: shouldEnqueueGeographyResearchJob({ status: "failed" }) === true,
+  },
+  {
+    name: "Completed jobs without allocations can be requeued by pending scan",
+    pass: shouldEnqueueGeographyResearchJob({ status: "completed" }) === true,
   },
 ];
 
