@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Minus,
+  Pencil,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -38,6 +39,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatCurrency, normalizeCurrencyCode } from "@/lib/currency";
+import {
+  EditableTransaction,
+  ManualTransactionModal,
+} from "@/components/manual-transaction-modal";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_URL ??
@@ -90,6 +95,7 @@ interface Props {
   searchQuery: string;
   dateRange: TransactionDateRange;
   onDeleted?: () => void;
+  onEdited?: () => void;
   onExportRowsChange?: (rows: TransactionExportRow[]) => void;
 }
 
@@ -150,10 +156,12 @@ export function TransactionHistoryTab({
   searchQuery,
   dateRange,
   onDeleted,
+  onEdited,
   onExportRowsChange,
 }: Props) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [editTarget, setEditTarget] = useState<Transaction | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Transaction | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [sortBy, setSortBy] = useState<SortKey>("date");
@@ -354,14 +362,24 @@ export function TransactionHistoryTab({
                     {transaction.commission !== 0 ? formatAmount(transaction.commission, displayCurrency) : "-"}
                   </TableCell>
                   <TableCell>
-                    <button
-                      type="button"
-                      onClick={() => setDeleteTarget(transaction)}
-                      className="rounded p-1 text-destructive opacity-0 transition-opacity hover:bg-destructive/10 group-hover:opacity-100"
-                      title="Delete transaction"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                      <button
+                        type="button"
+                        onClick={() => setEditTarget(transaction)}
+                        className="rounded p-1 text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground"
+                        title="Edit transaction"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteTarget(transaction)}
+                        className="rounded p-1 text-destructive transition-colors hover:bg-destructive/10"
+                        title="Delete transaction"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))
@@ -446,6 +464,20 @@ export function TransactionHistoryTab({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <ManualTransactionModal
+        open={!!editTarget}
+        onOpenChange={(open) => {
+          if (!open) setEditTarget(null);
+        }}
+        portfolioId={portfolioId}
+        transaction={editTarget as EditableTransaction | null}
+        onAdded={async () => {
+          setEditTarget(null);
+          await fetchTransactions();
+          onEdited?.();
+        }}
+      />
     </>
   );
 }

@@ -206,6 +206,7 @@ function normalizeTransactionRows(rows: NormalisedTransactionRow[]): NormalisedT
       date: normalizeDateString(String(row.date ?? "")),
       symbol: String(row.symbol || (row.isin ? row.isin : "CASH")).trim() || "CASH",
       isin: row.isin ? String(row.isin).trim().toUpperCase() : null,
+      yahoo_ticker: row.yahoo_ticker ? String(row.yahoo_ticker).trim().toUpperCase() : null,
       side,
       quantity: row.quantity ?? null,
       net_amount: row.net_amount ?? null,
@@ -399,6 +400,7 @@ interface NormalisedTransactionRow {
   date: string;
   symbol: string;
   isin: string | null;
+  yahoo_ticker?: string | null;
   side: TransactionSide;
   quantity: string | number | null;
   net_amount: string | number | null;
@@ -3902,7 +3904,7 @@ ${JSON.stringify(holdingsPromptPayload, null, 2)}`;
             date: row.date,
             symbol: row.symbol,
             isin: row.isin,
-            yahoo_ticker: row.isin ? (asset?.ticker ?? null) : null,
+            yahoo_ticker: row.yahoo_ticker ?? (row.isin ? (asset?.ticker ?? null) : null),
             side: row.side,
             quantity: row.quantity,
             net_amount: row.net_amount,
@@ -4065,12 +4067,59 @@ ${JSON.stringify(holdingsPromptPayload, null, 2)}`;
     }
 
     const transactionDeleteMatch = pathname.match(/^\/api\/portfolios\/([^/]+)\/transactions\/([^/]+)$/);
-    if (transactionDeleteMatch && method === "DELETE") {
+    if (transactionDeleteMatch && (method === "PATCH" || method === "DELETE")) {
       const [, portfolioId, txnId] = transactionDeleteMatch;
       const accessError = await requirePortfolioAccess(request, env, portfolioId);
       if (accessError) return accessError;
       if (!env.SNAPSHOT_QUEUE) {
         return json({ error: "Server misconfiguration: SNAPSHOT_QUEUE binding is missing" }, 500);
+      }
+
+      if (method === "PATCH") {
+        const body = (await request.json().catch(() => ({}))) as { row?: NormalisedTransactionRow };
+        const normalizedRows = normalizeTransactionRows(body.row ? [body.row] : []);
+        if (normalizedRows.length === 0) return json({ error: "row is required" }, 400);
+        const row = normalizedRows[0];
+        const parsedRow = {
+          ...row,
+          quantity: row.quantity == null ? null : parseFlexibleNumber(row.quantity),
+          net_amount: row.net_amount == null ? null : parseFlexibleNumber(row.net_amount),
+          commission: parseFlexibleNumber(row.commission ?? "0"),
+        };
+        let asset: AssetSearchResult | null = null;
+        if (!parsedRow.yahoo_ticker && parsedRow.isin) {
+          try {
+            asset = (await searchYahooAssets(parsedRow.isin))[0] ?? null;
+          } catch {
+            asset = null;
+          }
+        }
+        const primaryExchange = yahooExchangeToPrimary(asset?.exchange, asset?.ticker);
+        const { data, error } = await db(env)
+          .from("transactions")
+          .update({
+            date: parsedRow.date,
+            symbol: parsedRow.symbol,
+            isin: parsedRow.isin,
+            yahoo_ticker: parsedRow.yahoo_ticker ?? (parsedRow.isin ? (asset?.ticker ?? null) : null),
+            side: parsedRow.side,
+            quantity: parsedRow.quantity,
+            net_amount: parsedRow.net_amount,
+            commission: parsedRow.commission,
+          })
+          .eq("id", txnId)
+          .eq("portfolio_id", portfolioId)
+          .select("id")
+          .maybeSingle();
+        if (error) return json({ error: error.message }, 500);
+        if (!data) return json({ error: "Transaction not found" }, 404);
+        if (primaryExchange) {
+          await db(env).from("portfolios").update({ primary_exchange: primaryExchange }).eq("id", portfolioId);
+        }
+        await rebuildCurrentHoldings(env, portfolioId);
+        await syncAndEnqueueGeography(env, portfolioId, "transaction_import");
+        await env.SNAPSHOT_QUEUE.send({ type: "full_rebuild", portfolio_id: portfolioId });
+        return json({ updated: txnId });
       }
 
       const { error } = await db(env)

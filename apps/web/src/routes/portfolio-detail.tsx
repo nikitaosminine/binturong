@@ -33,6 +33,7 @@ import { Thesis, thesesForTicker } from "@/lib/thesis";
 import { EditHoldingModal } from "@/components/edit-holding-modal";
 import { AddHoldingModal } from "@/components/add-holding-modal";
 import { ImportTransactionsModal } from "@/components/import-transactions-modal";
+import { ManualTransactionModal } from "@/components/manual-transaction-modal";
 import { AnimatedCopyButton } from "@/components/lightswind/animated-copy-button";
 import { PortfolioChart } from "@/components/portfolio-chart";
 import { PrimaryTabs } from "@/components/primary-tabs";
@@ -534,10 +535,63 @@ function transactionToExportRow(transaction: TransactionApiRow): ExportRow {
   };
 }
 
+async function fetchPortfolioTransactions(portfolioId: string): Promise<TransactionApiRow[]> {
+  const response = await fetch(`${API_BASE_URL}/api/portfolios/${portfolioId}/transactions`, {
+    headers: await authHeaders(),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || "Failed to load transactions");
+  return (body.transactions ?? []) as TransactionApiRow[];
+}
+
 function isWithinDateRange(date: string, range: ExportDateRange) {
   const matchesFrom = !range.from || date >= range.from;
   const matchesTo = !range.to || date <= range.to;
   return matchesFrom && matchesTo;
+}
+
+function toFiniteNumber(value: number | null | undefined) {
+  const numericValue = Number(value ?? 0);
+  return Number.isFinite(numericValue) ? numericValue : 0;
+}
+
+function computeRealizedSellPnL(transactions: TransactionApiRow[]) {
+  const lots = new Map<string, { quantity: number; cost: number }>();
+  let realizedPnL = 0;
+  let realizedCostBasis = 0;
+
+  const chronologicalTransactions = [...transactions].sort((a, b) => a.date.localeCompare(b.date));
+
+  for (const transaction of chronologicalTransactions) {
+    if (!transaction.isin || (transaction.side !== "BUY" && transaction.side !== "SELL")) continue;
+
+    const quantity = toFiniteNumber(transaction.quantity);
+    if (quantity <= 0) continue;
+
+    const lot = lots.get(transaction.isin) ?? { quantity: 0, cost: 0 };
+    if (transaction.side === "BUY") {
+      lot.quantity += quantity;
+      lot.cost += Math.abs(toFiniteNumber(transaction.net_amount));
+      lots.set(transaction.isin, lot);
+      continue;
+    }
+
+    const averageCost = lot.quantity > 0 ? lot.cost / lot.quantity : 0;
+    const soldCostBasis = averageCost * quantity;
+    realizedPnL += toFiniteNumber(transaction.net_amount) - soldCostBasis;
+    realizedCostBasis += soldCostBasis;
+    lot.quantity -= quantity;
+    lot.cost = Math.max(0, lot.cost - soldCostBasis);
+
+    if (lot.quantity > 0.000001) lots.set(transaction.isin, lot);
+    else lots.delete(transaction.isin);
+  }
+
+  return {
+    realizedPnL,
+    realizedCostBasis,
+    realizedPct: realizedCostBasis > 0 ? (realizedPnL / realizedCostBasis) * 100 : 0,
+  };
 }
 
 function activeBenchmarksStorageKey(portfolioId: string) {
@@ -722,6 +776,7 @@ export default function PortfolioDetailPage() {
     currency: string | null;
   } | null>(null);
   const [holdings, setHoldings] = useState<Holding[]>([]);
+  const [transactionRows, setTransactionRows] = useState<TransactionApiRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [liveQuotes, setLiveQuotes] = useState<Record<string, LiveQuote>>({});
   const [fxRates, setFxRates] = useState<Record<string, number>>({});
@@ -748,6 +803,7 @@ export default function PortfolioDetailPage() {
   const [cashAction, setCashAction] = useState<"deposit" | "withdraw">("deposit");
   const [cashAmount, setCashAmount] = useState("");
   const [cashSubmitting, setCashSubmitting] = useState(false);
+  const [manualTransactionOpen, setManualTransactionOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"holdings" | "transactions">("holdings");
   const shouldReduceMotion = useReducedMotion();
@@ -797,16 +853,25 @@ export default function PortfolioDetailPage() {
   );
 
   const load = useCallback(async () => {
-    const [pRes, hRes] = await Promise.all([
+    const transactionRowsPromise = portfolioId
+      ? fetchPortfolioTransactions(portfolioId).catch((error) => {
+          toast.error(error instanceof Error ? error.message : "Failed to load transactions");
+          return [] as TransactionApiRow[];
+        })
+      : Promise.resolve([] as TransactionApiRow[]);
+
+    const [pRes, hRes, nextTransactionRows] = await Promise.all([
       supabase
         .from("portfolios")
         .select("id, name, description, cash_value, currency")
         .eq("id", portfolioId!)
         .single(),
       supabase.from("holdings").select("*").eq("portfolio_id", portfolioId!),
+      transactionRowsPromise,
     ]);
     if (pRes.error) toast.error("Failed to load portfolio");
     else setPortfolio(pRes.data);
+    setTransactionRows(nextTransactionRows);
     if (!hRes.error) {
       const nextHoldings = hRes.data || [];
       const nextPortfolioCurrency = normalizeCurrencyCode(pRes.data?.currency);
@@ -869,8 +934,13 @@ export default function PortfolioDetailPage() {
   const cashValue = portfolio?.cash_value ?? 0;
   const totalValue = holdingsValue + cashValue;
   const totalCost = holdingsCost + cashValue;
-  const totalPL = totalValue - totalCost;
-  const returnPct = totalCost > 0 ? (totalPL / totalCost) * 100 : 0;
+  const unrealizedPL = holdingsValue - holdingsCost;
+  const unrealizedPct = holdingsCost > 0 ? (unrealizedPL / holdingsCost) * 100 : 0;
+  const realizedMetrics = useMemo(
+    () => computeRealizedSellPnL(transactionRows),
+    [transactionRows],
+  );
+  const hasRealizedPnL = realizedMetrics.realizedCostBasis > 0;
 
   const rows: RowData[] = useMemo(() => {
     const r = holdings.map((h) => {
@@ -1373,12 +1443,7 @@ export default function PortfolioDetailPage() {
 
   const fetchTransactionExportRows = async (dateRange: ExportDateRange) => {
     if (!portfolioId) return [];
-    const response = await fetch(`${API_BASE_URL}/api/portfolios/${portfolioId}/transactions`, {
-      headers: await authHeaders(),
-    });
-    const body = await response.json();
-    if (!response.ok) throw new Error(body.error || "Failed to load transactions");
-    return ((body.transactions ?? []) as TransactionApiRow[])
+    return (await fetchPortfolioTransactions(portfolioId))
       .filter((transaction) => isWithinDateRange(transaction.date, dateRange))
       .map(transactionToExportRow);
   };
@@ -1436,8 +1501,10 @@ export default function PortfolioDetailPage() {
       "Total Value": totalValue,
       Cash: cashValue,
       "Cost Basis": totalCost,
-      "Unrealized P/L": totalPL,
-      "Return %": Number(returnPct.toFixed(2)),
+      "Unrealized P/L": unrealizedPL,
+      "Unrealized P/L %": Number(unrealizedPct.toFixed(2)),
+      "Realized P/L": hasRealizedPnL ? realizedMetrics.realizedPnL : "",
+      "Realized P/L %": hasRealizedPnL ? Number(realizedMetrics.realizedPct.toFixed(2)) : "",
       Holdings: holdings.length,
     };
 
@@ -1568,21 +1635,39 @@ export default function PortfolioDetailPage() {
       value: fmtMoney(totalValue, portfolioCurrency),
       loading: !marketReady,
     },
-    { label: "Cash", value: fmtMoney(cashValue, portfolioCurrency), muted: cashValue === 0 },
-    { label: "Cost basis", value: fmtMoney(totalCost, portfolioCurrency), hierarchy: "secondary" },
     {
       label: "Unrealized P/L",
-      value: totalPL === 0 ? "—" : fmtMoney(totalPL, portfolioCurrency),
-      tone: totalPL > 0 ? "positive" : totalPL < 0 ? "negative" : undefined,
-      muted: totalPL === 0,
+      value: unrealizedPL === 0 ? "—" : fmtMoney(unrealizedPL, portfolioCurrency),
+      detail: unrealizedPL === 0 ? undefined : `${fmtPct(unrealizedPct)} · open`,
+      tone: unrealizedPL > 0 ? "positive" : unrealizedPL < 0 ? "negative" : undefined,
+      muted: unrealizedPL === 0,
       loading: !marketReady,
+      emphasis: true,
     },
     {
-      label: "Return",
-      value: returnPct === 0 ? "—" : fmtPct(returnPct),
-      tone: returnPct > 0 ? "positive" : returnPct < 0 ? "negative" : undefined,
-      muted: returnPct === 0,
-      loading: !marketReady,
+      label: "Realized P/L",
+      value: hasRealizedPnL ? fmtMoney(realizedMetrics.realizedPnL, portfolioCurrency) : "—",
+      detail: hasRealizedPnL ? `${fmtPct(realizedMetrics.realizedPct)} · closed` : undefined,
+      tone:
+        realizedMetrics.realizedPnL > 0
+          ? "positive"
+          : realizedMetrics.realizedPnL < 0
+            ? "negative"
+            : undefined,
+      muted: !hasRealizedPnL,
+      emphasis: true,
+    },
+    {
+      label: "Cost basis",
+      value: fmtMoney(totalCost, portfolioCurrency),
+      hierarchy: "secondary",
+      subtle: true,
+    },
+    {
+      label: "Cash",
+      value: fmtMoney(cashValue, portfolioCurrency),
+      muted: cashValue === 0,
+      subtle: cashValue !== 0,
     },
   ];
 
@@ -1631,7 +1716,7 @@ export default function PortfolioDetailPage() {
           <div className="flex flex-col gap-6" style={{ height: ROW_HEIGHT }}>
             {/* KPI strip */}
             <div className="rounded-2xl border border-hairline bg-surface px-4 py-3">
-              <dl className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2 xl:grid-cols-5">
+              <dl className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
                 {KPIS.map((kpi, i) => (
                   <div
                     key={kpi.label}
@@ -1650,17 +1735,28 @@ export default function PortfolioDetailPage() {
                       <dd className="mt-1 h-[22px] w-28 animate-pulse rounded bg-surface-2" />
                     ) : (
                       <dd
-                        className={`mt-1 truncate font-mono text-[clamp(18px,1.35vw,22px)] font-medium leading-none tabular-nums ${
+                        className={`mt-1 flex min-w-0 flex-col gap-1 font-mono leading-none tabular-nums ${
                           kpi.muted
                             ? "text-foreground-muted"
                             : kpi.tone === "positive"
                               ? "text-positive"
                               : kpi.tone === "negative"
                                 ? "text-negative"
-                                : "text-foreground"
+                                : kpi.subtle
+                                  ? "text-foreground-muted/85"
+                                  : "text-foreground"
                         }`}
                       >
-                        {kpi.value}
+                        <span
+                          className="truncate text-[clamp(18px,1.35vw,22px)] font-medium"
+                        >
+                          {kpi.value}
+                        </span>
+                        {kpi.detail && (
+                          <span className="truncate text-[clamp(12px,0.95vw,15px)] font-medium">
+                            {kpi.detail}
+                          </span>
+                        )}
                       </dd>
                     )}
                   </div>
@@ -1883,15 +1979,27 @@ export default function PortfolioDetailPage() {
                     </Button>
                   </>
                 ) : (
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() => setImportOpen(true)}
-                    className="rounded-full px-4"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    Import transactions
-                  </Button>
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setManualTransactionOpen(true)}
+                      className="rounded-full bg-background px-4"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Add transaction
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => setImportOpen(true)}
+                      className="rounded-full px-4"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Import transactions
+                    </Button>
+                  </>
                 )}
               </div>
             </div>
@@ -2149,6 +2257,7 @@ export default function PortfolioDetailPage() {
                 searchQuery={transactionSearch}
                 dateRange={transactionDateRange}
                 onDeleted={() => load()}
+                onEdited={() => load()}
               />
             </TabsContent>
           </div>
@@ -2425,6 +2534,17 @@ export default function PortfolioDetailPage() {
             }}
           />
         )}
+
+        <ManualTransactionModal
+          open={manualTransactionOpen}
+          onOpenChange={setManualTransactionOpen}
+          portfolioId={portfolioId!}
+          onAdded={() => {
+            setActiveTab("transactions");
+            void triggerGeographySync();
+            load();
+          }}
+        />
 
         <ImportTransactionsModal
           open={importOpen}
