@@ -3560,7 +3560,7 @@ export default {
         const systemPrompt = [
           "You are a portfolio analyst choosing benchmark concepts for a portfolio.",
           "Use your model knowledge first; do not assume web search is available.",
-          "Given holdings with ISINs, names, weights, sectors, and geographies, infer 1 to 3 appropriate benchmark concepts.",
+          "Given holdings with ISINs, names, weights, sectors, and geographies, infer 1 to 3 appropriate benchmark concepts, prioritizing indices over ETFs over funds.",
           "The frontend can only overlay instruments available through Yahoo Finance, so include precise Yahoo Finance search queries for each concept.",
           "Use needsWebSearch=true only when the concept is uncertain or needs external clarification before it can be resolved to a Yahoo Finance index, ETF, or fund.",
           "Return strict JSON only, no markdown, as an array of objects with: name, reason, yahooSearchQueries, confidence, needsWebSearch.",
