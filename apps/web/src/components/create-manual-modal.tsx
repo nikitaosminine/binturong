@@ -1,5 +1,11 @@
 import { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,7 +37,13 @@ interface Props {
 }
 
 const emptyHolding = (): Holding => ({
-  ticker: "", name: "", isin: null, date: undefined, price: "", quantity: "", fees: "0",
+  ticker: "",
+  name: "",
+  isin: null,
+  date: undefined,
+  price: "",
+  quantity: "",
+  fees: "0",
 });
 
 export function CreateManualModal({ open, onOpenChange, onCreated }: Props) {
@@ -53,8 +65,8 @@ export function CreateManualModal({ open, onOpenChange, onCreated }: Props) {
         MOCK_STOCKS.filter(
           (s) =>
             s.ticker.toLowerCase().includes(query.toLowerCase()) ||
-            s.name.toLowerCase().includes(query.toLowerCase())
-        ).slice(0, 5)
+            s.name.toLowerCase().includes(query.toLowerCase()),
+        ).slice(0, 5),
       );
     } else {
       setSearchResults([]);
@@ -63,7 +75,12 @@ export function CreateManualModal({ open, onOpenChange, onCreated }: Props) {
 
   const selectStock = (stock: (typeof MOCK_STOCKS)[0], index: number) => {
     const updated = [...holdings];
-    updated[index] = { ...updated[index], ticker: stock.ticker, name: stock.name, isin: stock.isin };
+    updated[index] = {
+      ...updated[index],
+      ticker: stock.ticker,
+      name: stock.name,
+      isin: stock.isin,
+    };
     setHoldings(updated);
     setSearchResults([]);
     setActiveSearch(null);
@@ -83,11 +100,16 @@ export function CreateManualModal({ open, onOpenChange, onCreated }: Props) {
   const handleSubmit = async () => {
     if (!portfolioName.trim()) return;
     const valid = holdings.every((h) => h.ticker && h.date && h.price && h.quantity);
-    if (!valid) { toast.error("Fill all required fields for each holding"); return; }
+    if (!valid) {
+      toast.error("Fill all required fields for each holding");
+      return;
+    }
     setLoading(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
       const { data: portfolio, error: pErr } = await supabase
@@ -141,11 +163,19 @@ export function CreateManualModal({ open, onOpenChange, onCreated }: Props) {
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>Portfolio name *</Label>
-              <Input placeholder="My Portfolio" value={portfolioName} onChange={(e) => setPortfolioName(e.target.value)} />
+              <Input
+                placeholder="My Portfolio"
+                value={portfolioName}
+                onChange={(e) => setPortfolioName(e.target.value)}
+              />
             </div>
             <div className="space-y-1.5">
               <Label>Description</Label>
-              <Input placeholder="Optional" value={description} onChange={(e) => setDescription(e.target.value)} />
+              <Input
+                placeholder="Optional"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+              />
             </div>
             <div className="space-y-1.5">
               <Label>Currency</Label>
@@ -154,13 +184,18 @@ export function CreateManualModal({ open, onOpenChange, onCreated }: Props) {
           </div>
 
           <div className="space-y-3">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Holdings</Label>
+            <Label className="text-xs uppercase tracking-wider text-muted-foreground">
+              Holdings
+            </Label>
             {holdings.map((h, i) => (
               <div key={i} className="rounded-lg border border-border/50 p-3 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-muted-foreground">#{i + 1}</span>
                   {holdings.length > 1 && (
-                    <button onClick={() => removeHolding(i)} className="text-muted-foreground hover:text-destructive">
+                    <button
+                      onClick={() => removeHolding(i)}
+                      className="text-muted-foreground hover:text-destructive"
+                    >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   )}
@@ -171,7 +206,10 @@ export function CreateManualModal({ open, onOpenChange, onCreated }: Props) {
                     placeholder="Search by ticker or name..."
                     value={h.ticker}
                     onChange={(e) => searchStocks(e.target.value, i)}
-                    onFocus={() => { setActiveSearch(i); if (h.ticker) searchStocks(h.ticker, i); }}
+                    onFocus={() => {
+                      setActiveSearch(i);
+                      if (h.ticker) searchStocks(h.ticker, i);
+                    }}
                     onBlur={() => setTimeout(() => setActiveSearch(null), 200)}
                   />
                   {h.name && <p className="text-xs text-muted-foreground mt-0.5">{h.name}</p>}
@@ -195,7 +233,13 @@ export function CreateManualModal({ open, onOpenChange, onCreated }: Props) {
                     <Label className="text-xs">Purchase date *</Label>
                     <Popover>
                       <PopoverTrigger asChild>
-                        <Button variant="outline" className={cn("w-full justify-start text-left text-sm font-normal", !h.date && "text-muted-foreground")}>
+                        <Button
+                          variant="outline"
+                          className={cn(
+                            "w-full justify-start text-left text-sm font-normal",
+                            !h.date && "text-muted-foreground",
+                          )}
+                        >
                           {h.date ? format(h.date, "MMM dd, yyyy") : "Pick a date"}
                         </Button>
                       </PopoverTrigger>
@@ -212,25 +256,52 @@ export function CreateManualModal({ open, onOpenChange, onCreated }: Props) {
                   </div>
                   <div>
                     <Label className="text-xs">Price *</Label>
-                    <Input type="number" step="0.01" placeholder="0.00" value={h.price} onChange={(e) => updateHolding(i, "price", e.target.value)} />
+                    <Input
+                      type="number"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={h.price}
+                      onChange={(e) => updateHolding(i, "price", e.target.value)}
+                    />
                   </div>
                   <div>
                     <Label className="text-xs">Quantity *</Label>
-                    <Input type="number" step="0.01" placeholder="0" value={h.quantity} onChange={(e) => updateHolding(i, "quantity", e.target.value)} />
+                    <Input
+                      type="number"
+                      step="0.01"
+                      placeholder="0"
+                      value={h.quantity}
+                      onChange={(e) => updateHolding(i, "quantity", e.target.value)}
+                    />
                   </div>
                   <div>
                     <Label className="text-xs">Fees</Label>
-                    <Input type="number" step="0.01" placeholder="0.00" value={h.fees} onChange={(e) => updateHolding(i, "fees", e.target.value)} />
+                    <Input
+                      type="number"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={h.fees}
+                      onChange={(e) => updateHolding(i, "fees", e.target.value)}
+                    />
                   </div>
                 </div>
               </div>
             ))}
-            <Button variant="outline" size="sm" onClick={() => setHoldings([...holdings, emptyHolding()])} className="w-full">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setHoldings([...holdings, emptyHolding()])}
+              className="w-full"
+            >
               <Plus className="h-4 w-4 mr-1" /> Add another holding
             </Button>
           </div>
 
-          <Button onClick={handleSubmit} disabled={!portfolioName.trim() || loading} className="w-full">
+          <Button
+            onClick={handleSubmit}
+            disabled={!portfolioName.trim() || loading}
+            className="w-full"
+          >
             {loading ? "Creating..." : "Create portfolio"}
           </Button>
         </div>

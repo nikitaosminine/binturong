@@ -24,7 +24,6 @@ import {
   signalsFor,
 } from "@/components/take/take-feed";
 
-
 const FILTER_TABS: { value: FilterTab; label: string }[] = [
   { value: "all", label: "All" },
   { value: "active", label: "Active" },

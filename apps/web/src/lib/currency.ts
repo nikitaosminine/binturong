@@ -14,11 +14,17 @@ export const CURRENCY_OPTIONS = [
 ] as const;
 
 export function normalizeCurrencyCode(value: unknown, fallback = DEFAULT_PORTFOLIO_CURRENCY) {
-  const code = String(value ?? "").trim().toUpperCase();
+  const code = String(value ?? "")
+    .trim()
+    .toUpperCase();
   return /^[A-Z]{3}$/.test(code) ? code : fallback;
 }
 
-export function formatCurrency(value: number, currency: string, options: Intl.NumberFormatOptions = {}) {
+export function formatCurrency(
+  value: number,
+  currency: string,
+  options: Intl.NumberFormatOptions = {},
+) {
   const maximumFractionDigits =
     typeof options.maximumFractionDigits === "number" ? options.maximumFractionDigits : undefined;
   const minimumFractionDigits =

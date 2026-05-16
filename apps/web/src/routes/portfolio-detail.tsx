@@ -42,10 +42,7 @@ import { AnimatedCopyButton } from "@/components/lightswind/animated-copy-button
 import { PortfolioChart } from "@/components/portfolio-chart";
 import { PrimaryTabs } from "@/components/primary-tabs";
 import { OrbitRing } from "@/components/loading-ui/orbit-ring";
-import {
-  TransactionDateRange,
-  TransactionHistoryTab,
-} from "@/components/transaction-history-tab";
+import { TransactionDateRange, TransactionHistoryTab } from "@/components/transaction-history-tab";
 import { AllocationCard } from "@/components/portfolio/AllocationCard";
 import {
   convertCurrency,
@@ -121,7 +118,6 @@ interface Holding {
   fees: number;
   purchase_date: string;
 }
-
 
 function fmtMoney(n: number, currency: string) {
   return formatCurrency(n, currency);
@@ -489,7 +485,11 @@ function exportToJson(filename: string, payload: unknown) {
   );
 }
 
-function rowsToWorksheet(rows: ExportRow[], headers: string[], sections: ExportSheetSection[] = []) {
+function rowsToWorksheet(
+  rows: ExportRow[],
+  headers: string[],
+  sections: ExportSheetSection[] = [],
+) {
   const sheetRows: ExportValue[][] = [
     headers,
     ...rows.map((row) => headers.map((key) => row[key] ?? "")),
@@ -682,7 +682,7 @@ function computeMonthlyReturnValues(points: Array<{ date: string; value: number 
     const endFactor = 1 + last.value / 100;
     return {
       period: getMonthLabel(monthKey),
-      value: startFactor > 0 ? Number((((endFactor / startFactor) - 1) * 100).toFixed(2)) : null,
+      value: startFactor > 0 ? Number(((endFactor / startFactor - 1) * 100).toFixed(2)) : null,
     };
   });
 }
@@ -695,7 +695,7 @@ function benchmarkPricesToReturnPoints(prices: BenchmarkPricePoint[]) {
   if (!base) return [];
   return sorted.map((point) => ({
     date: point.date,
-    value: ((point.close / base) - 1) * 100,
+    value: (point.close / base - 1) * 100,
   }));
 }
 
@@ -708,12 +708,7 @@ const PORTFOLIO_EXPORT_HEADERS = [
   "TWR %",
 ];
 const PORTFOLIO_RETURN_EXPORT_HEADERS = ["Period", "Portfolio Return %"];
-const ALLOCATION_EXPORT_HEADERS = [
-  "Category",
-  "Name",
-  "Weight %",
-  "Checked At",
-];
+const ALLOCATION_EXPORT_HEADERS = ["Category", "Name", "Weight %", "Checked At"];
 const HOLDINGS_EXPORT_HEADERS = [
   "Asset",
   "Ticker",
@@ -745,7 +740,15 @@ const TRANSACTION_EXPORT_HEADERS = [
   "Commission",
 ];
 
-function PerfCell({ value, money, currency = "EUR" }: { value: number; money?: boolean; currency?: string }) {
+function PerfCell({
+  value,
+  money,
+  currency = "EUR",
+}: {
+  value: number;
+  money?: boolean;
+  currency?: string;
+}) {
   const Icon = value > 0 ? ArrowUp : value < 0 ? ArrowDown : Minus;
   const tone = value > 0 ? "text-positive" : value < 0 ? "text-negative" : "text-foreground-muted";
   const text = money ? formatSignedCurrency(value, currency) : fmtPct(value);
@@ -922,7 +925,8 @@ export default function PortfolioDetailPage() {
     () =>
       holdings.reduce(
         (s, h) =>
-          s + convertCurrency(h.purchase_price * h.quantity, h.currency, portfolioCurrency, fxRates),
+          s +
+          convertCurrency(h.purchase_price * h.quantity, h.currency, portfolioCurrency, fxRates),
         0,
       ),
     [fxRates, holdings, portfolioCurrency],
@@ -932,10 +936,7 @@ export default function PortfolioDetailPage() {
   const totalCost = holdingsCost + cashValue;
   const unrealizedPL = holdingsValue - holdingsCost;
   const unrealizedPct = holdingsCost > 0 ? (unrealizedPL / holdingsCost) * 100 : 0;
-  const realizedMetrics = useMemo(
-    () => computeRealizedSellPnL(transactionRows),
-    [transactionRows],
-  );
+  const realizedMetrics = useMemo(() => computeRealizedSellPnL(transactionRows), [transactionRows]);
   const hasRealizedPnL = realizedMetrics.realizedCostBasis > 0;
 
   const rows: RowData[] = useMemo(() => {
@@ -944,7 +945,12 @@ export default function PortfolioDetailPage() {
       const cur = live?.currentPrice ?? h.purchase_price;
       const currency = normalizeCurrencyCode(live?.currency ?? h.currency, portfolioCurrency);
       const total = convertCurrency(cur * h.quantity, currency, portfolioCurrency, fxRates);
-      const cost = convertCurrency(h.purchase_price * h.quantity, h.currency, portfolioCurrency, fxRates);
+      const cost = convertCurrency(
+        h.purchase_price * h.quantity,
+        h.currency,
+        portfolioCurrency,
+        fxRates,
+      );
       const gl = total - cost;
       const weight = totalValue > 0 ? (total / totalValue) * 100 : 0;
       const perf1D = live?.change1dPercent ?? 0;
@@ -1324,7 +1330,10 @@ export default function PortfolioDetailPage() {
     const benchmarkReturnSeries = new Map<string, Array<{ date: string; value: number }>>();
     for (const benchmark of activeBenchmarks) {
       const ticker = benchmark.ticker.toUpperCase();
-      benchmarkReturnSeries.set(ticker, benchmarkPricesToReturnPoints(benchmarkPrices.get(ticker) ?? []));
+      benchmarkReturnSeries.set(
+        ticker,
+        benchmarkPricesToReturnPoints(benchmarkPrices.get(ticker) ?? []),
+      );
     }
 
     const rowsWithBenchmarks = chartRows.map((point) => {
@@ -1449,10 +1458,9 @@ export default function PortfolioDetailPage() {
   > => {
     if (!portfolioId) return {};
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/portfolios/${portfolioId}/last-prices`,
-        { headers: await authHeaders() },
-      );
+      const response = await fetch(`${API_BASE_URL}/api/portfolios/${portfolioId}/last-prices`, {
+        headers: await authHeaders(),
+      });
       if (!response.ok) return {};
       const body = (await response.json()) as Array<{
         ticker: string;
@@ -1586,7 +1594,11 @@ export default function PortfolioDetailPage() {
         };
         for (const scope of selectedCsvExportScopes) {
           const csvData = csvRowsByScope[scope];
-          exportToCsv(formatExportFilename(portfolio.name, scope, "csv"), csvData.rows, csvData.headers);
+          exportToCsv(
+            formatExportFilename(portfolio.name, scope, "csv"),
+            csvData.rows,
+            csvData.headers,
+          );
         }
       } else {
         exportToJson(formatExportFilename(portfolio.name, "export", "json"), dataset.jsonPayload);
@@ -1743,9 +1755,7 @@ export default function PortfolioDetailPage() {
                                   : "text-foreground"
                         }`}
                       >
-                        <span
-                          className="truncate text-[clamp(18px,1.35vw,22px)] font-medium"
-                        >
+                        <span className="truncate text-[clamp(18px,1.35vw,22px)] font-medium">
                           {kpi.value}
                         </span>
                         {kpi.detail && (
@@ -2191,7 +2201,9 @@ export default function PortfolioDetailPage() {
                                       {fmtMoney(r.total, portfolioCurrency)}
                                     </span>
                                   )}
-                                  {key === "gl" && <PerfCell value={r.gl} money currency={portfolioCurrency} />}
+                                  {key === "gl" && (
+                                    <PerfCell value={r.gl} money currency={portfolioCurrency} />
+                                  )}
                                   {key === "weight" && (
                                     <span className="font-mono text-[11px] tabular-nums text-foreground-muted">
                                       {r.weight.toFixed(1)}%
@@ -2260,7 +2272,10 @@ export default function PortfolioDetailPage() {
         </Tabs>
 
         <Sheet open={exportSheetOpen} onOpenChange={setExportSheetOpen}>
-          <SheetContent side="right" className="flex w-[min(440px,100vw)] flex-col gap-0 p-0 sm:max-w-[440px]">
+          <SheetContent
+            side="right"
+            className="flex w-[min(440px,100vw)] flex-col gap-0 p-0 sm:max-w-[440px]"
+          >
             <SheetHeader className="border-b border-hairline px-5 py-4 pr-12">
               <SheetTitle className="text-base">Export</SheetTitle>
               <SheetDescription>Download portfolio data for analysis or backup.</SheetDescription>
@@ -2371,7 +2386,10 @@ export default function PortfolioDetailPage() {
                     Date range
                   </Label>
                   <Select value={exportDatePreset} onValueChange={updateExportDatePreset}>
-                    <SelectTrigger id="export-date-range" className="h-10 rounded-full bg-background">
+                    <SelectTrigger
+                      id="export-date-range"
+                      className="h-10 rounded-full bg-background"
+                    >
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -2438,7 +2456,10 @@ export default function PortfolioDetailPage() {
               <Button
                 type="button"
                 onClick={handleExportDownload}
-                disabled={exportSubmitting || (exportFormat === "csv" && selectedCsvExportScopes.length === 0)}
+                disabled={
+                  exportSubmitting ||
+                  (exportFormat === "csv" && selectedCsvExportScopes.length === 0)
+                }
               >
                 <Download className="h-4 w-4" />
                 {exportSubmitting ? "Preparing..." : "Download"}
@@ -2467,7 +2488,8 @@ export default function PortfolioDetailPage() {
                 {cashAction === "deposit" ? "Deposit cash" : "Withdraw cash"}
               </DialogTitle>
               <DialogDescription>
-                Current cash balance: <span className="font-mono">{fmtMoney(cashValue, portfolioCurrency)}</span>
+                Current cash balance:{" "}
+                <span className="font-mono">{fmtMoney(cashValue, portfolioCurrency)}</span>
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-3">

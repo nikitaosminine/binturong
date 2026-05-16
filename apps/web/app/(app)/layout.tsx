@@ -11,9 +11,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { theses, addThesis, updateThesis, deleteThesis } = useTheses();
   const [selectedThesisId, setSelectedThesisId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
-  const [createPrefill, setCreatePrefill] = useState<
-    Partial<Pick<Thesis, "title" | "summary" | "tickers" | "horizon" | "tags">> | null
-  >(null);
+  const [createPrefill, setCreatePrefill] = useState<Partial<
+    Pick<Thesis, "title" | "summary" | "tickers" | "horizon" | "tags">
+  > | null>(null);
 
   const openDrawer = (id: string) => setSelectedThesisId(id);
   const openModal = (
@@ -29,7 +29,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   };
 
   const selectedThesis = selectedThesisId
-    ? theses.find((t) => t.id === selectedThesisId) ?? null
+    ? (theses.find((t) => t.id === selectedThesisId) ?? null)
     : null;
 
   return (

@@ -77,7 +77,9 @@ function writeCache<T>(key: string, entries: Record<string, T>) {
 }
 
 function normalizeTicker(ticker: string | null | undefined) {
-  return String(ticker ?? "").trim().toUpperCase();
+  return String(ticker ?? "")
+    .trim()
+    .toUpperCase();
 }
 
 function isStale(cachedAt: number, maxAgeMs: number) {
@@ -87,9 +89,9 @@ function isStale(cachedAt: number, maxAgeMs: number) {
 function isQuoteEntry(entry: CachedMarketQuote | undefined): entry is CachedMarketQuote {
   return Boolean(
     entry &&
-      normalizeTicker(entry.ticker) &&
-      (entry.currentPrice == null || Number.isFinite(entry.currentPrice)) &&
-      Number.isFinite(entry.cachedAt),
+    normalizeTicker(entry.ticker) &&
+    (entry.currentPrice == null || Number.isFinite(entry.currentPrice)) &&
+    Number.isFinite(entry.cachedAt),
   );
 }
 
@@ -162,7 +164,9 @@ export function getCachedFxRates(
   maxAgeMs = MARKET_CACHE_MAX_AGE_MS,
 ): CacheReadResult<number> {
   const cache = readCache<CachedFxRate>(FX_CACHE_KEY);
-  const uniqueKeys = Array.from(new Set(rateKeys.map((key) => key.trim().toUpperCase()).filter(Boolean)));
+  const uniqueKeys = Array.from(
+    new Set(rateKeys.map((key) => key.trim().toUpperCase()).filter(Boolean)),
+  );
   const entries: Record<string, number> = {};
   let hasAll = true;
   let hasAny = false;

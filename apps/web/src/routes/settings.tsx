@@ -6,7 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
@@ -25,7 +31,10 @@ async function fetchApiWithFallback(path: string, init?: RequestInit): Promise<R
 
     if (primary.ok) return primary;
 
-    const body = await primary.clone().text().catch(() => "");
+    const body = await primary
+      .clone()
+      .text()
+      .catch(() => "");
     const hasServerConfigError = body.includes("Server misconfiguration");
     if (!hasServerConfigError) return primary;
 
@@ -103,15 +112,15 @@ export default function SettingsPage() {
         setIsLoading(true);
         const [settingsRes, portfolioSettingsRes, metricsRes, alertsRes, portfoliosRes] =
           await Promise.all([
-          fetchApiWithFallback(`/api/agent/settings?user_id=${user.id}`),
-          fetchApiWithFallback(`/api/agent/portfolio-settings?user_id=${user.id}`),
-          fetchApiWithFallback(`/api/agent/metrics?user_id=${user.id}&hours=24`),
-          fetchApiWithFallback(`/api/agent/alerts?user_id=${user.id}&hours=24`),
-          supabase
-            .from("portfolios")
-            .select("id,name")
-            .eq("user_id", user.id)
-            .order("name", { ascending: true }),
+            fetchApiWithFallback(`/api/agent/settings?user_id=${user.id}`),
+            fetchApiWithFallback(`/api/agent/portfolio-settings?user_id=${user.id}`),
+            fetchApiWithFallback(`/api/agent/metrics?user_id=${user.id}&hours=24`),
+            fetchApiWithFallback(`/api/agent/alerts?user_id=${user.id}&hours=24`),
+            supabase
+              .from("portfolios")
+              .select("id,name")
+              .eq("user_id", user.id)
+              .order("name", { ascending: true }),
           ]);
 
         if (!settingsRes.ok) throw new Error(await settingsRes.text());
@@ -188,11 +197,11 @@ export default function SettingsPage() {
           portfolioId,
           runsPerDayOverride:
             payload.runsPerDayOverride === undefined
-              ? existing?.runs_per_day_override ?? null
+              ? (existing?.runs_per_day_override ?? null)
               : payload.runsPerDayOverride,
           agentEnabled:
             payload.agentEnabled === undefined
-              ? existing?.agent_enabled ?? true
+              ? (existing?.agent_enabled ?? true)
               : payload.agentEnabled,
         }),
       });
@@ -214,7 +223,9 @@ export default function SettingsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Agent run metrics (last 24h)</CardTitle>
-          <CardDescription>Quick health snapshot for queue depth, success rate, and latency.</CardDescription>
+          <CardDescription>
+            Quick health snapshot for queue depth, success rate, and latency.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {!metrics ? (
@@ -232,13 +243,17 @@ export default function SettingsPage() {
               <div className="rounded-md border border-border px-3 py-2">
                 <p className="text-xs text-muted-foreground">Success rate</p>
                 <p className="text-lg font-semibold">
-                  {metrics.success_rate == null ? "—" : `${Math.round(metrics.success_rate * 100)}%`}
+                  {metrics.success_rate == null
+                    ? "—"
+                    : `${Math.round(metrics.success_rate * 100)}%`}
                 </p>
               </div>
               <div className="rounded-md border border-border px-3 py-2">
                 <p className="text-xs text-muted-foreground">p95 duration</p>
                 <p className="text-lg font-semibold">
-                  {metrics.duration_ms.p95 == null ? "—" : `${Math.round(metrics.duration_ms.p95 / 1000)}s`}
+                  {metrics.duration_ms.p95 == null
+                    ? "—"
+                    : `${Math.round(metrics.duration_ms.p95 / 1000)}s`}
                 </p>
               </div>
               <div className="rounded-md border border-border px-3 py-2 sm:col-span-2 lg:col-span-4">
@@ -270,7 +285,9 @@ export default function SettingsPage() {
             <Input
               id="timezone"
               value={settings.timezone}
-              onChange={(event) => setSettings((prev) => ({ ...prev, timezone: event.target.value }))}
+              onChange={(event) =>
+                setSettings((prev) => ({ ...prev, timezone: event.target.value }))
+              }
               placeholder="Europe/Paris"
               disabled={isLoading || isSaving}
             />

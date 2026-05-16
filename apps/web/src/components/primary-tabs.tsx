@@ -19,7 +19,8 @@ const TABS: Tab[] = [
     match: (p) => p.startsWith("/portfolios"),
     href: (p) => {
       if (p.startsWith("/portfolios/")) return p;
-      const saved = typeof window !== "undefined" ? localStorage.getItem("binturong.last-portfolio-id") : null;
+      const saved =
+        typeof window !== "undefined" ? localStorage.getItem("binturong.last-portfolio-id") : null;
       return saved ? `/portfolios/${saved}` : "/portfolios";
     },
   },
