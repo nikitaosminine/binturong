@@ -35,9 +35,19 @@ interface AssetSearchResult {
   currency: string | null;
 }
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? (process.env.NODE_ENV === "production" ? "https://binturong-api.nikita-osminine.workers.dev" : "http://localhost:8787");
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ??
+  (process.env.NODE_ENV === "production"
+    ? "https://binturong-api.nikita-osminine.workers.dev"
+    : "http://localhost:8787");
 
-export function AddHoldingModal({ open, onOpenChange, portfolioId, portfolioCurrency, onAdded }: Props) {
+export function AddHoldingModal({
+  open,
+  onOpenChange,
+  portfolioId,
+  portfolioCurrency,
+  onAdded,
+}: Props) {
   const [ticker, setTicker] = useState("");
   const [name, setName] = useState("");
   const [assetType, setAssetType] = useState("");

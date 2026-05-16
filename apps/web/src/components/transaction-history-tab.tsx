@@ -41,10 +41,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatCurrency, normalizeCurrencyCode } from "@/lib/currency";
-import {
-  EditableTransaction,
-  ManualTransactionModal,
-} from "@/components/manual-transaction-modal";
+import { EditableTransaction, ManualTransactionModal } from "@/components/manual-transaction-modal";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ??
@@ -361,7 +358,9 @@ export function TransactionHistoryTab({
                     {formatAmount(transaction.net_amount, displayCurrency)}
                   </TableCell>
                   <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                    {transaction.commission !== 0 ? formatAmount(transaction.commission, displayCurrency) : "-"}
+                    {transaction.commission !== 0
+                      ? formatAmount(transaction.commission, displayCurrency)
+                      : "-"}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">

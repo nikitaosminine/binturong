@@ -1,9 +1,4 @@
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { CURRENCY_OPTIONS, normalizeCurrencyCode } from "@/lib/currency";
 
 interface CurrencySelectProps {

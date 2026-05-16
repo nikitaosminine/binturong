@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -71,11 +77,19 @@ export function EditPortfolioModal({ open, onOpenChange, portfolio, onSaved }: P
           <div className="space-y-3">
             <div className="space-y-1.5">
               <Label>Portfolio name *</Label>
-              <Input placeholder="My Portfolio" value={name} onChange={(e) => setName(e.target.value)} />
+              <Input
+                placeholder="My Portfolio"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
             </div>
             <div className="space-y-1.5">
               <Label>Description</Label>
-              <Input placeholder="Optional" value={description} onChange={(e) => setDescription(e.target.value)} />
+              <Input
+                placeholder="Optional"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+              />
             </div>
             <div className="space-y-1.5">
               <Label>Currency</Label>

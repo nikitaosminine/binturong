@@ -253,8 +253,12 @@ function PortfolioCard({
         <div>
           {marketReady ? (
             <>
-              <div className="text-[17px] font-semibold font-mono tabular-nums">{fmtMoney(val, currency)}</div>
-              <div className={`text-[11px] font-mono ${positive ? "text-positive" : "text-negative"}`}>
+              <div className="text-[17px] font-semibold font-mono tabular-nums">
+                {fmtMoney(val, currency)}
+              </div>
+              <div
+                className={`text-[11px] font-mono ${positive ? "text-positive" : "text-negative"}`}
+              >
                 {formatSignedCurrency(pl, currency)} · {fmtPct(plPct)}
               </div>
             </>
@@ -338,7 +342,8 @@ export default function PortfoliosPage() {
     const sourceCurrencies = nextPortfolios.flatMap((portfolio) => [
       portfolio.currency,
       ...portfolio.holdings.map(
-        (holding) => cachedQuotes.entries[holding.ticker.toUpperCase()]?.currency ?? holding.currency,
+        (holding) =>
+          cachedQuotes.entries[holding.ticker.toUpperCase()]?.currency ?? holding.currency,
       ),
     ]);
     const targetCurrencies = Array.from(
@@ -379,7 +384,11 @@ export default function PortfoliosPage() {
 
   useEffect(() => {
     const tickers = Array.from(
-      new Set(portfolios.flatMap((portfolio) => portfolio.holdings.map((holding) => holding.ticker.toUpperCase()))),
+      new Set(
+        portfolios.flatMap((portfolio) =>
+          portfolio.holdings.map((holding) => holding.ticker.toUpperCase()),
+        ),
+      ),
     ).filter(Boolean);
     if (tickers.length === 0) {
       setLiveQuotes({});
@@ -393,7 +402,8 @@ export default function PortfoliosPage() {
     const cachedSourceCurrencies = portfolios.flatMap((portfolio) => [
       portfolio.currency,
       ...portfolio.holdings.map(
-        (holding) => cachedQuotes.entries[holding.ticker.toUpperCase()]?.currency ?? holding.currency,
+        (holding) =>
+          cachedQuotes.entries[holding.ticker.toUpperCase()]?.currency ?? holding.currency,
       ),
     ]);
     const targetCurrencies = Array.from(
@@ -419,7 +429,9 @@ export default function PortfoliosPage() {
           ...portfolio.holdings.map((holding) => holding.currency),
         ]);
         const knownRateEntriesRequest = Promise.all(
-          targetCurrencies.map((target) => fetchFxRates(API_BASE_URL, knownSourceCurrencies, target)),
+          targetCurrencies.map((target) =>
+            fetchFxRates(API_BASE_URL, knownSourceCurrencies, target),
+          ),
         );
         const [response, knownRateEntries] = await Promise.all([
           quoteRequest,
@@ -466,10 +478,7 @@ export default function PortfoliosPage() {
     };
 
     if (cachedQuotes.shouldRefetch || cachedFx.shouldRefetch) void refreshMarketData();
-    const intervalId = window.setInterval(
-      () => void refreshMarketData(),
-      MARKET_CACHE_MAX_AGE_MS,
-    );
+    const intervalId = window.setInterval(() => void refreshMarketData(), MARKET_CACHE_MAX_AGE_MS);
 
     return () => {
       cancelled = true;
@@ -584,8 +593,16 @@ export default function PortfoliosPage() {
             value={fmtMoney(totalValue, DEFAULT_PORTFOLIO_CURRENCY)}
             loading={!marketReady}
           />
-          <StatCard label="Cash value" value={fmtMoney(totalCash, DEFAULT_PORTFOLIO_CURRENCY)} muted />
-          <StatCard label="Total cost" value={fmtMoney(totalCost, DEFAULT_PORTFOLIO_CURRENCY)} muted />
+          <StatCard
+            label="Cash value"
+            value={fmtMoney(totalCash, DEFAULT_PORTFOLIO_CURRENCY)}
+            muted
+          />
+          <StatCard
+            label="Total cost"
+            value={fmtMoney(totalCost, DEFAULT_PORTFOLIO_CURRENCY)}
+            muted
+          />
           <StatCard
             label="Unrealized P/L"
             value={fmtMoney(totalPL, DEFAULT_PORTFOLIO_CURRENCY)}

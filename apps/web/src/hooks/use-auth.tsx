@@ -54,9 +54,8 @@ export function useAuth(): AuthState {
       email,
       password,
       options: {
-        emailRedirectTo: typeof window !== "undefined"
-          ? `${window.location.origin}/auth/callback`
-          : undefined,
+        emailRedirectTo:
+          typeof window !== "undefined" ? `${window.location.origin}/auth/callback` : undefined,
       },
     });
     if (error) throw error;
@@ -67,9 +66,10 @@ export function useAuth(): AuthState {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: typeof window !== "undefined"
-          ? `${window.location.origin}/auth/callback?next=/portfolios`
-          : undefined,
+        redirectTo:
+          typeof window !== "undefined"
+            ? `${window.location.origin}/auth/callback?next=/portfolios`
+            : undefined,
       },
     });
     if (error) throw error;

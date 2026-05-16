@@ -81,11 +81,7 @@ export function ThemeSwitcher({ compact = false }: { compact?: boolean }) {
     >
       <Icon className="h-4 w-4 shrink-0" />
       <span className="truncate">{label}</span>
-      <Switch
-        className="ml-auto"
-        checked={isDark}
-        onCheckedChange={() => handleToggle()}
-      />
+      <Switch className="ml-auto" checked={isDark} onCheckedChange={() => handleToggle()} />
     </label>
   );
 }

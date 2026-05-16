@@ -1,26 +1,42 @@
 export const MOCK_STOCKS = [
-  { ticker: "AAPL",  name: "Apple Inc.",              isin: "US0378331005", sector: "Technology" },
-  { ticker: "MSFT",  name: "Microsoft Corporation",   isin: "US5949181045", sector: "Technology" },
-  { ticker: "GOOGL", name: "Alphabet Inc.",            isin: "US02079K3059", sector: "Technology" },
-  { ticker: "AMZN",  name: "Amazon.com Inc.",          isin: "US0231351067", sector: "Consumer Discretionary" },
-  { ticker: "NVDA",  name: "NVIDIA Corporation",       isin: "US67066G1040", sector: "Technology" },
-  { ticker: "TSLA",  name: "Tesla Inc.",               isin: "US88160R1014", sector: "Consumer Discretionary" },
-  { ticker: "META",  name: "Meta Platforms Inc.",      isin: "US30303M1027", sector: "Technology" },
-  { ticker: "JPM",   name: "JPMorgan Chase & Co.",     isin: "US46625H1005", sector: "Financials" },
-  { ticker: "V",     name: "Visa Inc.",                isin: "US92826C8394", sector: "Financials" },
-  { ticker: "JNJ",   name: "Johnson & Johnson",        isin: "US4781601046", sector: "Healthcare" },
-  { ticker: "WMT",   name: "Walmart Inc.",             isin: "US9311421039", sector: "Consumer Staples" },
-  { ticker: "UNH",   name: "UnitedHealth Group",       isin: "US91324P1021", sector: "Healthcare" },
-  { ticker: "BRK.B", name: "Berkshire Hathaway B",    isin: "US0846707026", sector: "Financials" },
-  { ticker: "XOM",   name: "Exxon Mobil Corporation", isin: "US30231G1022", sector: "Energy" },
-  { ticker: "PG",    name: "Procter & Gamble Co.",    isin: "US7427181091", sector: "Consumer Staples" },
+  { ticker: "AAPL", name: "Apple Inc.", isin: "US0378331005", sector: "Technology" },
+  { ticker: "MSFT", name: "Microsoft Corporation", isin: "US5949181045", sector: "Technology" },
+  { ticker: "GOOGL", name: "Alphabet Inc.", isin: "US02079K3059", sector: "Technology" },
+  {
+    ticker: "AMZN",
+    name: "Amazon.com Inc.",
+    isin: "US0231351067",
+    sector: "Consumer Discretionary",
+  },
+  { ticker: "NVDA", name: "NVIDIA Corporation", isin: "US67066G1040", sector: "Technology" },
+  { ticker: "TSLA", name: "Tesla Inc.", isin: "US88160R1014", sector: "Consumer Discretionary" },
+  { ticker: "META", name: "Meta Platforms Inc.", isin: "US30303M1027", sector: "Technology" },
+  { ticker: "JPM", name: "JPMorgan Chase & Co.", isin: "US46625H1005", sector: "Financials" },
+  { ticker: "V", name: "Visa Inc.", isin: "US92826C8394", sector: "Financials" },
+  { ticker: "JNJ", name: "Johnson & Johnson", isin: "US4781601046", sector: "Healthcare" },
+  { ticker: "WMT", name: "Walmart Inc.", isin: "US9311421039", sector: "Consumer Staples" },
+  { ticker: "UNH", name: "UnitedHealth Group", isin: "US91324P1021", sector: "Healthcare" },
+  { ticker: "BRK.B", name: "Berkshire Hathaway B", isin: "US0846707026", sector: "Financials" },
+  { ticker: "XOM", name: "Exxon Mobil Corporation", isin: "US30231G1022", sector: "Energy" },
+  { ticker: "PG", name: "Procter & Gamble Co.", isin: "US7427181091", sector: "Consumer Staples" },
 ];
 
 export const MOCK_PRICES: Record<string, number> = {
-  AAPL:  198.50, MSFT:  415.20, GOOGL: 155.80, AMZN:  186.40,
-  NVDA:  875.30, TSLA:  245.60, META:  505.75, JPM:   198.30,
-  V:     280.15, JNJ:   158.40, WMT:   172.90, UNH:   525.60,
-  "BRK.B": 415.10, XOM: 118.40, PG: 165.20,
+  AAPL: 198.5,
+  MSFT: 415.2,
+  GOOGL: 155.8,
+  AMZN: 186.4,
+  NVDA: 875.3,
+  TSLA: 245.6,
+  META: 505.75,
+  JPM: 198.3,
+  V: 280.15,
+  JNJ: 158.4,
+  WMT: 172.9,
+  UNH: 525.6,
+  "BRK.B": 415.1,
+  XOM: 118.4,
+  PG: 165.2,
 };
 
 export function getSector(ticker: string): string {
@@ -66,7 +82,10 @@ export function generateChartData(period: string, seed = 0) {
         const d = new Date(now);
         d.setDate(d.getDate() - i);
         baseValue += deterministicStep(i, 300);
-        points.push({ date: d.toLocaleDateString("en-US", { weekday: "short" }), value: Math.max(100, Math.round(baseValue * 100) / 100) });
+        points.push({
+          date: d.toLocaleDateString("en-US", { weekday: "short" }),
+          value: Math.max(100, Math.round(baseValue * 100) / 100),
+        });
       }
       break;
 
@@ -77,7 +96,10 @@ export function generateChartData(period: string, seed = 0) {
         const d = new Date(now);
         d.setDate(d.getDate() - i);
         baseValue += deterministicStep(i, 250);
-        points.push({ date: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }), value: Math.max(100, Math.round(baseValue * 100) / 100) });
+        points.push({
+          date: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+          value: Math.max(100, Math.round(baseValue * 100) / 100),
+        });
       }
       break;
 
@@ -87,7 +109,10 @@ export function generateChartData(period: string, seed = 0) {
         const d = new Date(now);
         d.setDate(d.getDate() - i * 7);
         baseValue += deterministicStep(i, 600);
-        points.push({ date: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }), value: Math.max(100, Math.round(baseValue * 100) / 100) });
+        points.push({
+          date: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+          value: Math.max(100, Math.round(baseValue * 100) / 100),
+        });
       }
       break;
 
@@ -97,7 +122,10 @@ export function generateChartData(period: string, seed = 0) {
         const d = new Date(now);
         d.setDate(d.getDate() - i * 7);
         baseValue += deterministicStep(i, 800);
-        points.push({ date: d.toLocaleDateString("en-US", { month: "short", year: "2-digit" }), value: Math.max(100, Math.round(baseValue * 100) / 100) });
+        points.push({
+          date: d.toLocaleDateString("en-US", { month: "short", year: "2-digit" }),
+          value: Math.max(100, Math.round(baseValue * 100) / 100),
+        });
       }
       break;
   }

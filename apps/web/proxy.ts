@@ -4,11 +4,12 @@ import { NextResponse, type NextRequest } from "next/server";
 const SUPABASE_URL =
   process.env.NEXT_PUBLIC_SUPABASE_URL ?? "https://sfqowvpuzsqgmwlecgdx.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY =
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? "sb_publishable_xcYBQwzQm7_Cv8eoqAI8rw_eFVLZiGp";
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
+  "sb_publishable_xcYBQwzQm7_Cv8eoqAI8rw_eFVLZiGp";
 
 const APP_ROUTES = ["/portfolios", "/the-take", "/settings"];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {

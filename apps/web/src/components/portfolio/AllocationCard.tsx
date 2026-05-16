@@ -251,10 +251,14 @@ function WorldMap({ countries }: { countries: CountryAllocation[] }) {
   }, [countries]);
 
   const paths = useMemo(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const collection = feature(countriesAtlas as any, (countriesAtlas as any).objects.countries) as unknown as {
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const collection = feature(
+      countriesAtlas as any,
+      (countriesAtlas as any).objects.countries,
+    ) as unknown as {
       features: Array<{ id?: string | number; properties?: { name?: string } }>;
     };
+    /* eslint-enable @typescript-eslint/no-explicit-any */
     const visibleFeatures = collection.features.filter((mapFeature) => {
       const numericId = String(mapFeature.id ?? "").padStart(3, "0");
       return numericId !== "010" && mapFeature.properties?.name !== "Antarctica";

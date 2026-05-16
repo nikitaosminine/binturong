@@ -1,0 +1,4 @@
+# Bulk Prettier formatting + line-ending normalization (no behavior change).
+# Enable locally with: git config blame.ignoreRevsFile .git-blame-ignore-revs
+# GitHub applies this file automatically.
+5688ae1929a42fbc911183c5d0cb240b0fbe819b
