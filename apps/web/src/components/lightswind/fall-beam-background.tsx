@@ -1,4 +1,6 @@
-import { useMemo } from "react";
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { useReducedMotion } from "framer-motion";
 import { cn } from "@/lib/utils";
@@ -29,6 +31,12 @@ export default function FallBeamBackground({
   beamColorClass = "cyan-400",
 }: FallBeamBackgroundProps) {
   const shouldReduceMotion = useReducedMotion();
+  // The beams use computed (deterministic-but-float) positions and depend on
+  // useReducedMotion, both of which differ between the server render and the
+  // client hydration render. Defer them to a post-mount client render so the
+  // server/client first paint match exactly (no hydration mismatch).
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const beams = useMemo(
     () =>
       Array.from({ length: lineCount }, (_, index) => {
@@ -52,22 +60,23 @@ export default function FallBeamBackground({
     >
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_35%,var(--accent-teal-soft),transparent_42%)]" />
       <div className="absolute inset-0 bg-[linear-gradient(to_bottom,transparent_0%,var(--background)_86%)]" />
-      {beams.map((beam, index) => (
-        <span
-          key={index}
-          className={cn(
-            "absolute top-0 h-full w-px bg-foreground/5",
-            shouldReduceMotion ? "opacity-35" : "fall-beam-line",
-          )}
-          style={
-            {
-              left: `${beam.position}%`,
-              "--fall-beam-duration": `${beam.duration}s`,
-              "--fall-beam-delay": `${beam.delay}s`,
-            } as CSSProperties
-          }
-        />
-      ))}
+      {mounted &&
+        beams.map((beam, index) => (
+          <span
+            key={index}
+            className={cn(
+              "absolute top-0 h-full w-px bg-foreground/5",
+              shouldReduceMotion ? "opacity-35" : "fall-beam-line",
+            )}
+            style={
+              {
+                left: `${beam.position}%`,
+                "--fall-beam-duration": `${beam.duration}s`,
+                "--fall-beam-delay": `${beam.delay}s`,
+              } as CSSProperties
+            }
+          />
+        ))}
     </div>
   );
 }
