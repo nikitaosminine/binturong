@@ -1,3 +1,5 @@
+"use client";
+
 import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,7 +12,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
 
 const DEPLOYED_API_BASE_URL = "https://binturong-api.nikita-osminine.workers.dev";
-const API_BASE_URL = import.meta.env.VITE_API_URL ?? DEPLOYED_API_BASE_URL;
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? DEPLOYED_API_BASE_URL;
 
 async function fetchApiWithFallback(path: string, init?: RequestInit): Promise<Response> {
   const primaryUrl = `${API_BASE_URL}${path}`;

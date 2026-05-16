@@ -1,3 +1,5 @@
+"use client";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Search, Trash2, X } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
@@ -29,8 +31,8 @@ import nodeIconBlack from "../../../../Node_assets/hexagon/node-logo-icon-black.
 import nodeIconWhite from "../../../../Node_assets/hexagon/node-logo-icon-white.svg";
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_URL ??
-  (import.meta.env.PROD
+  process.env.NEXT_PUBLIC_API_URL ??
+  (process.env.NODE_ENV === "production"
     ? "https://binturong-api.nikita-osminine.workers.dev"
     : "http://localhost:8787");
 
@@ -107,7 +109,7 @@ const chartConfig = {
   },
 } satisfies ChartConfig;
 
-const PILL_TRANSITION = { type: "spring", stiffness: 420, damping: 34, mass: 0.7 };
+const PILL_TRANSITION = { type: "spring" as const, stiffness: 420, damping: 34, mass: 0.7 };
 const MAX_ACTIVE_BENCHMARKS = 4;
 const BENCHMARK_PALETTE = ["amber", "violet", "rose", "sky"] as const;
 const BENCHMARK_COLORS: Record<string, string> = {
@@ -184,7 +186,7 @@ function computeReturns(points: PortfolioChartPoint[], period: BarPeriod): Retur
   return bars;
 }
 
-async function authHeaders() {
+async function authHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   if (!token) throw new Error("Not authenticated");
@@ -226,12 +228,12 @@ function parseStoredActiveBenchmarks(value: string | null): BenchmarkDefinition[
         const color = String(row.color ?? "").trim();
         if (!name || !ticker || !color) return null;
         return {
-          id: typeof row.id === "string" ? row.id : undefined,
+          ...(typeof row.id === "string" ? { id: row.id } : {}),
           name,
           ticker,
           color,
           weights: Array.isArray(row.weights) ? (row.weights as BenchmarkWeight[]) : null,
-        };
+        } as BenchmarkDefinition;
       })
       .filter((item): item is BenchmarkDefinition => item != null)
       .slice(0, MAX_ACTIVE_BENCHMARKS);
@@ -431,7 +433,7 @@ function ExpandableBenchmarkSearch({
       <motion.form
         initial={false}
         animate={{ width: expanded ? 360 : 40 }}
-        transition={{ type: "spring", stiffness: 400, damping: 30 }}
+        transition={{ type: "spring" as const, stiffness: 400, damping: 30 }}
         style={{ maxWidth: "calc(100vw - 2rem)" }}
         onSubmit={(event) => event.preventDefault()}
         onClick={() => !expanded && setExpanded(true)}

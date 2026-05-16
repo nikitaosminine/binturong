@@ -1,3 +1,5 @@
+"use client";
+
 import { useState, useEffect, useCallback } from "react";
 import { Thesis, ThesisBodyBlock, ThesisEvidence, ThesisAttachment, ThesisConviction, ThesisStatus } from "@/lib/thesis";
 import { supabase } from "@/integrations/supabase/client";

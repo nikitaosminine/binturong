@@ -1,4 +1,7 @@
-import { Link, useLocation } from "react-router-dom";
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { NotebookText, Wallet } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -16,7 +19,7 @@ const TABS: Tab[] = [
     match: (p) => p.startsWith("/portfolios"),
     href: (p) => {
       if (p.startsWith("/portfolios/")) return p;
-      const saved = localStorage.getItem("binturong.last-portfolio-id");
+      const saved = typeof window !== "undefined" ? localStorage.getItem("binturong.last-portfolio-id") : null;
       return saved ? `/portfolios/${saved}` : "/portfolios";
     },
   },
@@ -29,7 +32,7 @@ const TABS: Tab[] = [
 ];
 
 export function PrimaryTabs() {
-  const { pathname } = useLocation();
+  const pathname = usePathname();
 
   return (
     <div className="h-14 border-b border-hairline">
@@ -39,7 +42,7 @@ export function PrimaryTabs() {
           return (
             <Link
               key={t.label}
-              to={t.href(pathname)}
+              href={t.href(pathname)}
               className={`relative flex h-full items-center gap-2 px-3 text-sm font-medium transition-colors ${
                 active ? "text-foreground" : "text-foreground-muted hover:text-foreground"
               }`}

@@ -1,5 +1,7 @@
+"use client";
+
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,7 +13,7 @@ import { toast } from "sonner";
 
 export default function LoginPage() {
   const { isAuthenticated, isLoading } = useAuth();
-  const navigate = useNavigate();
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSignUp, setIsSignUp] = useState(false);
@@ -19,9 +21,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      navigate("/portfolios", { replace: true });
+      router.replace("/portfolios");
     }
-  }, [isAuthenticated, isLoading, navigate]);
+  }, [isAuthenticated, isLoading, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,7 +34,7 @@ export default function LoginPage() {
         if (signUpError && !signUpError.message.includes("already registered")) throw signUpError;
         if (data.session) {
           // Email confirmation is disabled — session returned immediately
-          navigate("/portfolios");
+          router.push("/portfolios");
         } else {
           // Email confirmation required
           toast.success("Check your email to confirm your account, then sign in.");
@@ -40,7 +42,7 @@ export default function LoginPage() {
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        navigate("/portfolios");
+        router.push("/portfolios");
       }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Authentication failed");
@@ -52,7 +54,7 @@ export default function LoginPage() {
   const handleGoogleLogin = async () => {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${window.location.origin}/portfolios` },
+      options: { redirectTo: `${window.location.origin}/auth/callback?next=/portfolios` },
     });
     if (error) toast.error(error.message);
   };

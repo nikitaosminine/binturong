@@ -1,5 +1,7 @@
+"use client";
+
 import { useState, useEffect, useCallback } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { createClient } from "@/integrations/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
 
 export interface AuthState {
@@ -19,13 +21,19 @@ export function useAuth(): AuthState {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const supabase = createClient();
+
+    // Seed initial state from the cookie-backed session
+    supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
       setIsLoading(false);
     });
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    // Keep in sync with auth state changes (sign in, sign out, token refresh)
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
       setIsLoading(false);
@@ -35,28 +43,40 @@ export function useAuth(): AuthState {
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
+    const supabase = createClient();
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
   }, []);
 
   const signUp = useCallback(async (email: string, password: string) => {
+    const supabase = createClient();
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: typeof window !== "undefined" ? window.location.origin : undefined },
+      options: {
+        emailRedirectTo: typeof window !== "undefined"
+          ? `${window.location.origin}/auth/callback`
+          : undefined,
+      },
     });
     if (error) throw error;
   }, []);
 
   const signInWithGoogle = useCallback(async () => {
+    const supabase = createClient();
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: typeof window !== "undefined" ? window.location.origin + "/portfolios" : undefined },
+      options: {
+        redirectTo: typeof window !== "undefined"
+          ? `${window.location.origin}/auth/callback?next=/portfolios`
+          : undefined,
+      },
     });
     if (error) throw error;
   }, []);
 
   const signOut = useCallback(async () => {
+    const supabase = createClient();
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
   }, []);

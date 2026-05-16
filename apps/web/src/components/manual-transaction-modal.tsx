@@ -1,3 +1,5 @@
+"use client";
+
 import { useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { Search } from "lucide-react";
@@ -23,8 +25,8 @@ import {
 import { TextShimmer } from "@/components/loading-ui/text-shimmer";
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_URL ??
-  (import.meta.env.PROD
+  process.env.NEXT_PUBLIC_API_URL ??
+  (process.env.NODE_ENV === "production"
     ? "https://binturong-api.nikita-osminine.workers.dev"
     : "http://localhost:8787");
 
@@ -79,7 +81,7 @@ function tickerFromTypedValue(value: string): string | null {
   return /^[A-Z0-9.-]{1,15}$/.test(trimmed) ? trimmed : null;
 }
 
-async function authHeaders() {
+async function authHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   if (!token) throw new Error("Not authenticated");

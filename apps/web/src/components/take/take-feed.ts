@@ -57,13 +57,14 @@ export function insightFromTheses(theses: Thesis[]): TakeInsight[] {
         id: evidence.id,
         thesisId: thesis.id,
         ticker: thesis.tickers[0] ?? "N/A",
-        status:
+        status: (
           evidence.type === "warn"
             ? "At risk"
             : evidence.type === "confirm"
               ? "Supportive"
-              : "Neutral",
-        source: "market",
+              : "Neutral"
+        ) as InsightStatus,
+        source: "market" as InsightSource,
         headline: evidence.text,
         body: `${thesis.title} · ${thesis.summary}`,
         hoursAgo: toHoursAgo(evidence.date),

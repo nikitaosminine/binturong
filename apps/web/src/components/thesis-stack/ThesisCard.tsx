@@ -34,7 +34,7 @@ export function ThesisCard({ thesis, expanded, onChange, onOpen }: Props) {
       layout
       className="relative w-full overflow-hidden rounded-xl border border-border bg-card text-card-foreground"
       whileHover={expanded ? { y: -2 } : undefined}
-      transition={{ type: "spring", stiffness: 300, damping: 30 }}
+      transition={{ type: "spring" as const, stiffness: 300, damping: 30 }}
     >
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
 
