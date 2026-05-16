@@ -86,7 +86,7 @@ export function CreateManualModal({ open, onOpenChange, onCreated }: Props) {
     setActiveSearch(null);
   };
 
-  const updateHolding = (index: number, field: keyof Holding, value: any) => {
+  const updateHolding = (index: number, field: keyof Holding, value: Holding[keyof Holding]) => {
     const updated = [...holdings];
     updated[index] = { ...updated[index], [field]: value };
     setHoldings(updated);
@@ -145,8 +145,8 @@ export function CreateManualModal({ open, onOpenChange, onCreated }: Props) {
       setCurrency(DEFAULT_PORTFOLIO_CURRENCY);
       setHoldings([emptyHolding()]);
       onCreated();
-    } catch (err: any) {
-      toast.error(err.message || "Failed to create portfolio");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create portfolio");
     } finally {
       setLoading(false);
     }

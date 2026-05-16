@@ -23,5 +23,12 @@ export default tseslint.config(
     },
   },
   next.configs["core-web-vitals"],
+  {
+    // Vendored shadcn/ui — kept in sync with upstream, which ships these types.
+    files: ["src/components/ui/**/*.{ts,tsx}"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+    },
+  },
   eslintPluginPrettier,
 );

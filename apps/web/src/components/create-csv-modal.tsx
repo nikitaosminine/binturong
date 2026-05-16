@@ -301,8 +301,8 @@ export function CreateCsvModal({ open, onOpenChange, onCreated }: Props) {
       setCurrency(DEFAULT_PORTFOLIO_CURRENCY);
       setFile(null);
       onCreated();
-    } catch (err: any) {
-      toast.error(err.message || "Failed to create portfolio");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create portfolio");
     } finally {
       setLoading(false);
     }
