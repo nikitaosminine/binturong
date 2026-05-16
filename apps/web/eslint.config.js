@@ -1,4 +1,5 @@
 import js from "@eslint/js";
+import next from "@next/eslint-plugin-next";
 import eslintPluginPrettier from "eslint-plugin-prettier/recommended";
 import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
@@ -21,5 +22,6 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": "off",
     },
   },
+  next.configs["core-web-vitals"],
   eslintPluginPrettier,
 );

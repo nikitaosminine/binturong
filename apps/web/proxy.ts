@@ -8,7 +8,7 @@ const SUPABASE_PUBLISHABLE_KEY =
 
 const APP_ROUTES = ["/portfolios", "/the-take", "/settings"];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
