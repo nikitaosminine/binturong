@@ -27,8 +27,6 @@ import { TextShimmer } from "@/components/loading-ui/text-shimmer";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { formatCurrency, normalizeCurrencyCode } from "@/lib/currency";
-import nodeIconBlack from "../../../../Node_assets/hexagon/node-logo-icon-black.svg";
-import nodeIconWhite from "../../../../Node_assets/hexagon/node-logo-icon-white.svg";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ??
@@ -494,8 +492,16 @@ function ExpandableBenchmarkSearch({
                     <InfinityLoop className="h-6 w-8" />
                   ) : (
                     <>
-                      <img src={nodeIconBlack} alt="" className="h-5 w-5 dark:hidden" />
-                      <img src={nodeIconWhite} alt="" className="hidden h-5 w-5 dark:block" />
+                      <img
+                        src="/brand/node-logo-icon-black.svg"
+                        alt=""
+                        className="h-5 w-5 dark:hidden"
+                      />
+                      <img
+                        src="/brand/node-logo-icon-white.svg"
+                        alt=""
+                        className="hidden h-5 w-5 dark:block"
+                      />
                     </>
                   )}
                 </button>
