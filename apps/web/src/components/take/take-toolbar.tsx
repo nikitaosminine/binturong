@@ -18,7 +18,7 @@ interface TakeToolbarProps {
   onSearchChange: (value: string) => void;
 }
 
-const PILL_TRANSITION = { type: "spring", stiffness: 420, damping: 34, mass: 0.7 };
+const PILL_TRANSITION = { type: "spring" as const, stiffness: 420, damping: 34, mass: 0.7 };
 
 export function TakeToolbar({
   tabs,

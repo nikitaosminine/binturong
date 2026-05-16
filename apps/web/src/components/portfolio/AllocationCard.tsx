@@ -1,3 +1,5 @@
+"use client";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronRight, PieChart, RefreshCcw, Globe2 } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
@@ -46,8 +48,8 @@ type Props = {
 type View = "classic" | "geography";
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_URL ??
-  (import.meta.env.PROD
+  process.env.NEXT_PUBLIC_API_URL ??
+  (process.env.NODE_ENV === "production"
     ? "https://binturong-api.nikita-osminine.workers.dev"
     : "http://localhost:8787");
 
@@ -71,7 +73,7 @@ const TEXT_PALETTE = [
 
 const MINOR_COUNTRY_THRESHOLD = 3;
 const OTHER_COUNTRY_FILL = "var(--foreground-muted)";
-const PILL_TRANSITION = { type: "spring", stiffness: 420, damping: 34, mass: 0.7 };
+const PILL_TRANSITION = { type: "spring" as const, stiffness: 420, damping: 34, mass: 0.7 };
 
 const COUNTRY_CODE_TO_NUMERIC: Record<string, string> = {
   AE: "784",
@@ -121,7 +123,7 @@ const COUNTRY_CODE_TO_NUMERIC: Record<string, string> = {
   ZA: "710",
 };
 
-async function authHeaders() {
+async function authHeaders(): Promise<Record<string, string>> {
   const {
     data: { session },
   } = await supabase.auth.getSession();
@@ -249,10 +251,10 @@ function WorldMap({ countries }: { countries: CountryAllocation[] }) {
   }, [countries]);
 
   const paths = useMemo(() => {
-    const collection = feature(
-      countriesAtlas as unknown as { objects: { countries: unknown } },
-      (countriesAtlas as unknown as { objects: { countries: unknown } }).objects.countries,
-    ) as unknown as { features: Array<{ id?: string | number; properties?: { name?: string } }> };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const collection = feature(countriesAtlas as any, (countriesAtlas as any).objects.countries) as unknown as {
+      features: Array<{ id?: string | number; properties?: { name?: string } }>;
+    };
     const visibleFeatures = collection.features.filter((mapFeature) => {
       const numericId = String(mapFeature.id ?? "").padStart(3, "0");
       return numericId !== "010" && mapFeature.properties?.name !== "Antarctica";

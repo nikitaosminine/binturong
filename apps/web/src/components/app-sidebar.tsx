@@ -1,5 +1,8 @@
+"use client";
+
 import { useState, type ReactNode } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { BarChart3, LogOut, PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
 import { NodeLogo } from "@/components/node-logo";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
@@ -29,8 +32,8 @@ const GROUPS: NavGroup[] = [
 
 export function AppSidebar({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
-  const { pathname } = useLocation();
-  const navigate = useNavigate();
+  const pathname = usePathname();
+  const router = useRouter();
 
   const isActive = (to: string) =>
     to === "/portfolios"
@@ -39,7 +42,7 @@ export function AppSidebar({ children }: { children: ReactNode }) {
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
-    navigate("/login");
+    router.push("/login");
   };
 
   return (
@@ -56,7 +59,7 @@ export function AppSidebar({ children }: { children: ReactNode }) {
           }`}
         >
           <Link
-            to="/portfolios"
+            href="/portfolios"
             aria-label="Node home"
             className={`flex min-w-0 items-center ${
               collapsed
@@ -89,7 +92,7 @@ export function AppSidebar({ children }: { children: ReactNode }) {
                     return (
                       <li key={item.to}>
                         <Link
-                          to={item.to}
+                          href={item.to}
                           title={collapsed ? item.label : undefined}
                           className={`flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${
                             active

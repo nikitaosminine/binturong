@@ -73,7 +73,7 @@ export function AnimatedCopyButton({
         initial: { opacity: 0, scale: 0.65, rotate: -12 },
         animate: { opacity: 1, scale: 1, rotate: 0 },
         exit: { opacity: 0, scale: 0.65, rotate: 12 },
-        transition: { type: "spring", stiffness: 520, damping: 32, mass: 0.55 },
+        transition: { type: "spring" as const, stiffness: 520, damping: 32, mass: 0.55 },
       };
 
   return (

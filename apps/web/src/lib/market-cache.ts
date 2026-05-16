@@ -1,3 +1,5 @@
+"use client";
+
 import { currencyRateKey, normalizeCurrencyCode } from "@/lib/currency";
 
 export const MARKET_CACHE_MAX_AGE_MS = 5 * 60 * 1000;

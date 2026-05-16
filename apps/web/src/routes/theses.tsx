@@ -1,6 +1,8 @@
+"use client";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, ChevronRight, X } from "lucide-react";
-import { useOutletContext } from "react-router-dom";
+import { useThesisContext } from "@/contexts/thesis-context";
 import { motion, useReducedMotion } from "framer-motion";
 import { Thesis } from "@/lib/thesis";
 import { useAuth } from "@/hooks/use-auth";
@@ -22,14 +24,6 @@ import {
   signalsFor,
 } from "@/components/take/take-feed";
 
-interface ThesisContext {
-  theses: Thesis[];
-  openDrawer: (id: string) => void;
-  openModal: (
-    thesis?: Thesis,
-    prefill?: Partial<Pick<Thesis, "title" | "summary" | "tickers" | "horizon" | "tags">>,
-  ) => void;
-}
 
 const FILTER_TABS: { value: FilterTab; label: string }[] = [
   { value: "all", label: "All" },
@@ -51,12 +45,12 @@ type PeriodFilter = "All" | "Last week" | "Last month";
 const PERIOD_FILTERS: PeriodFilter[] = ["All", "Last week", "Last month"];
 
 type SortOrder = "desc" | "asc";
-const PILL_TRANSITION = { type: "spring", stiffness: 420, damping: 34, mass: 0.7 };
+const PILL_TRANSITION = { type: "spring" as const, stiffness: 420, damping: 34, mass: 0.7 };
 const API_BASE_URL =
-  import.meta.env.VITE_API_URL ?? "https://binturong-api.nikita-osminine.workers.dev";
+  process.env.NEXT_PUBLIC_API_URL ?? "https://binturong-api.nikita-osminine.workers.dev";
 
 export default function ThesesPage() {
-  const { theses, openDrawer, openModal } = useOutletContext<ThesisContext>();
+  const { theses, openDrawer, openModal } = useThesisContext();
   const { user } = useAuth();
   const [filter, setFilter] = useState<FilterTab>("all");
   const [search, setSearch] = useState("");

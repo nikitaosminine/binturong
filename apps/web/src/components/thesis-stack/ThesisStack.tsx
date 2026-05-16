@@ -97,7 +97,7 @@ export function ThesisStack({ theses, onUpdate, onOpen }: Props) {
                       y: i === theses.length - 1 ? -3 : 0,
                     },
                   }}
-                  transition={{ type: "spring", stiffness: 260, damping: 28 }}
+                  transition={{ type: "spring" as const, stiffness: 260, damping: 28 }}
                 >
                   <ThesisCard thesis={t} expanded={false} onChange={onUpdate} onOpen={onOpen} />
                 </motion.div>

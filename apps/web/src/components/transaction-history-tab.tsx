@@ -1,3 +1,5 @@
+"use client";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
@@ -45,8 +47,8 @@ import {
 } from "@/components/manual-transaction-modal";
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_URL ??
-  (import.meta.env.PROD
+  process.env.NEXT_PUBLIC_API_URL ??
+  (process.env.NODE_ENV === "production"
     ? "https://binturong-api.nikita-osminine.workers.dev"
     : "http://localhost:8787");
 
@@ -143,7 +145,7 @@ function toExportRows(transactions: Transaction[]): TransactionExportRow[] {
   }));
 }
 
-async function authHeaders() {
+async function authHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   if (!token) throw new Error("Not authenticated");

@@ -1,22 +1,19 @@
+"use client";
+
 import { useState } from "react";
-import { Navigate, Outlet } from "react-router-dom";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ThesisCenteredModal } from "@/components/thesis-centered-modal";
-import { useAuth } from "@/hooks/use-auth";
 import { useTheses } from "@/hooks/use-theses";
-import { Thesis } from "@/lib/thesis";
+import { ThesisContext } from "@/contexts/thesis-context";
+import type { Thesis } from "@/lib/thesis";
 
-export default function PrivateRoute() {
-  const { isAuthenticated, isLoading } = useAuth();
+export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { theses, addThesis, updateThesis, deleteThesis } = useTheses();
   const [selectedThesisId, setSelectedThesisId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [createPrefill, setCreatePrefill] = useState<
     Partial<Pick<Thesis, "title" | "summary" | "tickers" | "horizon" | "tags">> | null
   >(null);
-
-  if (isLoading) return null;
-  if (!isAuthenticated) return <Navigate to="/login" replace />;
 
   const openDrawer = (id: string) => setSelectedThesisId(id);
   const openModal = (
@@ -34,14 +31,13 @@ export default function PrivateRoute() {
   const selectedThesis = selectedThesisId
     ? theses.find((t) => t.id === selectedThesisId) ?? null
     : null;
-  const context = { theses, addThesis, updateThesis, deleteThesis, openDrawer, openModal };
 
   return (
-    <>
+    <ThesisContext.Provider
+      value={{ theses, addThesis, updateThesis, deleteThesis, openDrawer, openModal }}
+    >
       <AppSidebar>
-        <div className="flex min-h-screen flex-col">
-          <Outlet context={context} />
-        </div>
+        <div className="flex min-h-screen flex-col">{children}</div>
       </AppSidebar>
       <ThesisCenteredModal
         open={!!selectedThesisId || createOpen}
@@ -67,6 +63,6 @@ export default function PrivateRoute() {
           setCreatePrefill(null);
         }}
       />
-    </>
+    </ThesisContext.Provider>
   );
 }

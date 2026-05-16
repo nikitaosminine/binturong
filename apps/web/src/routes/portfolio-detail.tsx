@@ -1,8 +1,12 @@
+"use client";
+
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import * as XLSX from "xlsx";
 import { DateRange } from "react-day-picker";
 import { format } from "date-fns";
-import { Link, useParams, useOutletContext } from "react-router-dom";
+import Link from "next/link";
+import { useParams } from "next/navigation";
+import { useThesisContext } from "@/contexts/thesis-context";
 import { motion, useReducedMotion } from "framer-motion";
 import {
   ArrowLeft,
@@ -118,15 +122,6 @@ interface Holding {
   purchase_date: string;
 }
 
-interface ThesisContext {
-  theses: Thesis[];
-  openDrawer: (id: string) => void;
-  openModal: (
-    thesis?: Thesis,
-    prefill?: Partial<Pick<Thesis, "title" | "summary" | "tickers" | "horizon" | "tags">>,
-  ) => void;
-  updateThesis: (id: string, patch: Partial<Thesis>) => void;
-}
 
 function fmtMoney(n: number, currency: string) {
   return formatCurrency(n, currency);
@@ -368,8 +363,8 @@ const PILL_TRANSITION = { type: "spring" as const, stiffness: 420, damping: 34, 
 const ACTIVE_BENCHMARKS_STORAGE_PREFIX = "portfolio-chart:active-benchmarks";
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_URL ??
-  (import.meta.env.PROD
+  process.env.NEXT_PUBLIC_API_URL ??
+  (process.env.NODE_ENV === "production"
     ? "https://binturong-api.nikita-osminine.workers.dev"
     : "http://localhost:8787");
 
@@ -765,8 +760,9 @@ function PerfCell({ value, money, currency = "EUR" }: { value: number; money?: b
 }
 
 export default function PortfolioDetailPage() {
-  const { portfolioId } = useParams<{ portfolioId: string }>();
-  const { theses, openDrawer, openModal } = useOutletContext<ThesisContext>();
+  const params = useParams();
+  const portfolioId = params.portfolioId as string;
+  const { theses, openDrawer, openModal } = useThesisContext();
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [portfolio, setPortfolio] = useState<{
     id: string;
@@ -1619,7 +1615,7 @@ export default function PortfolioDetailPage() {
       <div className="py-24 text-center">
         <p className="text-foreground-muted">Portfolio not found</p>
         <Link
-          to="/portfolios"
+          href="/portfolios"
           className="mt-2 inline-block text-sm text-foreground hover:underline"
         >
           Back to portfolios
@@ -1679,7 +1675,7 @@ export default function PortfolioDetailPage() {
         {/* Compact header */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
-            <Link to="/portfolios">
+            <Link href="/portfolios">
               <button
                 type="button"
                 className="grid h-7 w-7 place-items-center rounded-md text-foreground-muted transition-colors hover:bg-surface-2 hover:text-foreground"

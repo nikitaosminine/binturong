@@ -1,5 +1,7 @@
+"use client";
+
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useRouter } from "next/navigation";
 import { MoreHorizontal, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
@@ -58,8 +60,8 @@ interface LiveQuote {
 }
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_URL ??
-  (import.meta.env.PROD
+  process.env.NEXT_PUBLIC_API_URL ??
+  (process.env.NODE_ENV === "production"
     ? "https://binturong-api.nikita-osminine.workers.dev"
     : "http://localhost:8787");
 
@@ -307,7 +309,7 @@ function AddCard({ onNewCsv, onNewManual }: { onNewCsv: () => void; onNewManual:
 }
 
 export default function PortfoliosPage() {
-  const navigate = useNavigate();
+  const router = useRouter();
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [loading, setLoading] = useState(true);
   const [csvOpen, setCsvOpen] = useState(false);
@@ -625,7 +627,7 @@ export default function PortfoliosPage() {
             <PortfolioCard
               key={p.id}
               portfolio={p}
-              onClick={() => navigate(`/portfolios/${p.id}`)}
+              onClick={() => router.push(`/portfolios/${p.id}`)}
               onEdit={() => handleEditPortfolio(p)}
               onDelete={() => handleDeletePortfolio(p)}
               liveQuotes={liveQuotes}

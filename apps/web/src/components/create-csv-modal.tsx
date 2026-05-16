@@ -1,3 +1,5 @@
+"use client";
+
 import { useState, useCallback } from "react";
 import {
   Dialog,
@@ -25,7 +27,7 @@ interface AssetSearchResult {
   currency: string | null;
 }
 
-interface ParsedCsvRow extends Record<string, string> {
+interface ParsedCsvRow {
   __row: number;
   __ticker: string;
   __exchange: string;
@@ -34,6 +36,7 @@ interface ParsedCsvRow extends Record<string, string> {
   __quantity: number;
   __fees: number;
   __isin: string;
+  [key: string]: string | number;
 }
 
 const EXCHANGE_ALIASES: Record<string, string> = {
@@ -137,8 +140,8 @@ function pickBestSearchMatch(
 }
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_URL ??
-  (import.meta.env.PROD
+  process.env.NEXT_PUBLIC_API_URL ??
+  (process.env.NODE_ENV === "production"
     ? "https://binturong-api.nikita-osminine.workers.dev"
     : "http://localhost:8787");
 
@@ -273,12 +276,12 @@ export function CreateCsvModal({ open, onOpenChange, onCreated }: Props) {
         const stock = MOCK_STOCKS.find((s) => s.ticker === ticker);
 
         const resolvedTicker = resolved?.ticker?.toUpperCase() || ticker;
-        const csvIsin = row.__isin || row.ISIN?.trim();
+        const csvIsin = row.__isin || (row.ISIN as string | undefined)?.trim();
 
         return {
           portfolio_id: portfolio.id,
           ticker: resolvedTicker,
-          name: resolved?.name || stock?.name || row.Ticker || "Unknown",
+          name: resolved?.name || stock?.name || String(row.Ticker || "Unknown"),
           asset_type: resolved?.assetType || null,
           currency: normalizeCurrencyCode(resolved?.currency, currency),
           isin: csvIsin || stock?.isin || null,
