@@ -51,7 +51,6 @@
   --color-hairline: var(--hairline);
   --color-positive: var(--positive);
   --color-negative: var(--negative);
-  --color-accent-teal: var(--accent-teal);
   --color-foreground-muted: var(--foreground-muted);
   --color-alloc-1: var(--alloc-1);
   --color-alloc-2: var(--alloc-2);
@@ -64,10 +63,12 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  --color-benchmark-amber: var(--benchmark-amber);
+  --color-benchmark-violet: var(--benchmark-violet);
+  --color-benchmark-rose: var(--benchmark-rose);
+  --color-benchmark-sky: var(--benchmark-sky);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
   --color-sidebar-accent: var(--sidebar-accent);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
@@ -132,12 +133,17 @@
   --chart-5: oklch(0.62 0.17 35);
   --sidebar: oklch(0.985 0.002 260);
   --sidebar-foreground: var(--foreground);
-  --sidebar-primary: var(--accent-teal);
-  --sidebar-primary-foreground: var(--primary-foreground);
   --sidebar-accent: oklch(0.95 0.004 260);
   --sidebar-accent-foreground: var(--foreground);
   --sidebar-border: var(--hairline);
   --sidebar-ring: var(--accent-teal);
+
+  /* Benchmark series palette (portfolio comparison lines) */
+  --benchmark-amber: #f5a524;
+  --benchmark-violet: #b978f2;
+  --benchmark-rose: #f75f85;
+  --benchmark-sky: #14b8e6;
+
   --scrollbar: oklch(0.78 0.006 260);
   --scrollbar-hover: oklch(0.68 0.008 260);
 }
@@ -198,12 +204,17 @@
   --chart-5: oklch(0.72 0.18 35);
   --sidebar: oklch(0.11 0 0);
   --sidebar-foreground: var(--foreground);
-  --sidebar-primary: var(--accent-teal);
-  --sidebar-primary-foreground: var(--primary-foreground);
   --sidebar-accent: oklch(0.18 0 0);
   --sidebar-accent-foreground: var(--foreground);
   --sidebar-border: var(--hairline);
   --sidebar-ring: var(--accent-teal);
+
+  /* Benchmark series palette — brightened for dark backgrounds */
+  --benchmark-amber: #f7b94e;
+  --benchmark-violet: #cb98f6;
+  --benchmark-rose: #fa83a0;
+  --benchmark-sky: #3cc6ef;
+
   --scrollbar: oklch(0.34 0 0);
   --scrollbar-hover: oklch(0.46 0 0);
 }
