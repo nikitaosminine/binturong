@@ -4,6 +4,9 @@ import { Toaster } from "@/components/ui/sonner";
 import { ThemeInitializer } from "@/components/ThemeSwitcher";
 import "../src/styles.css";
 
+// Typography source of truth: see apps/web/DESIGN_SYSTEM.md.
+// next/font loaders must stay at module scope here (Next.js requirement);
+// only the weights listed below exist in the system — keep the doc in sync.
 const dmSans = DM_Sans({
   subsets: ["latin"],
   weight: ["400", "500", "600"],

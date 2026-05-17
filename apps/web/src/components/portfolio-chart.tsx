@@ -111,10 +111,10 @@ const PILL_TRANSITION = { type: "spring" as const, stiffness: 420, damping: 34, 
 const MAX_ACTIVE_BENCHMARKS = 4;
 const BENCHMARK_PALETTE = ["amber", "violet", "rose", "sky"] as const;
 const BENCHMARK_COLORS: Record<string, string> = {
-  amber: "#f5a524",
-  violet: "#b978f2",
-  rose: "#f75f85",
-  sky: "#14b8e6",
+  amber: "var(--benchmark-amber)",
+  violet: "var(--benchmark-violet)",
+  rose: "var(--benchmark-rose)",
+  sky: "var(--benchmark-sky)",
 };
 const ACTIVE_BENCHMARKS_STORAGE_PREFIX = "portfolio-chart:active-benchmarks";
 
